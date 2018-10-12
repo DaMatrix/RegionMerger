@@ -1,0 +1,12 @@
+.gradle/
+.idea/
+*.iml
+*.ipr
+*.class
+target/
+build/
+run/
+out/
+/porklib.daporkchop.net/
+
+/primitive/src/
