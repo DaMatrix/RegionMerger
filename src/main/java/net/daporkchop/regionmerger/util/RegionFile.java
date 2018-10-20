@@ -73,7 +73,7 @@ public class RegionFile {
     static final int CHUNK_HEADER_SIZE = 5;
     private static final byte emptySector[] = new byte[4096];
 
-    private final File fileName;
+    public final File fileName;
     private RandomAccessFile file;
     private final int offsets[];
     private final int chunkTimestamps[];
