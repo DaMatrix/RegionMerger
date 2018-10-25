@@ -57,4 +57,11 @@ public class World {
         }
         return new RegionFile(new File(this.regions, String.format("r.%d.%d.mca", pos.x, pos.z)));
     }
+
+    public RegionFile getOrCreateRegion(Pos pos) {
+        if (!this.ownedRegions.contains(pos)) {
+            this.ownedRegions.add(pos);
+        }
+        return new RegionFile(new File(this.regions, String.format("r.%d.%d.mca", pos.x, pos.z)));
+    }
 }

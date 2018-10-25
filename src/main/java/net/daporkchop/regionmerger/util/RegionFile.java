@@ -193,7 +193,7 @@ public class RegionFile {
         try {
             int offset = getOffset(x, z);
             if (offset == 0) {
-                // debugln("READ", x, z, "miss");
+                debugln("READ", x, z, "miss");
                 return null;
             }
 
