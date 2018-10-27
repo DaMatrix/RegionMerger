@@ -64,4 +64,8 @@ public class World {
         }
         return new RegionFile(new File(this.regions, String.format("r.%d.%d.mca", pos.x, pos.z)));
     }
+
+    public File getActualFileForRegion(Pos pos) {
+        return new File(this.regions, String.format("r.%d.%d.mca", pos.x, pos.z));
+    }
 }

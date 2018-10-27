@@ -9,7 +9,9 @@ import net.daporkchop.regionmerger.util.RegionFile;
 import net.daporkchop.regionmerger.util.ThrowingBiConsumer;
 import net.daporkchop.regionmerger.util.ThrowingConsumer;
 
+import java.io.DataInputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -22,13 +24,14 @@ import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 public class RegionMerger {
-    public static final ThreadLocal<byte[]> BUFFER_CACHE = ThreadLocal.withInitial(() -> new byte[8192]);
+    public static final ThreadLocal<byte[]> BUFFER_CACHE = ThreadLocal.withInitial(() -> new byte[0xFFFFFF]);
 
     public static void main(String... args) throws IOException {
         if (args.length == 0 || (args.length == 1 && "--help".equals(args[0]))) {
@@ -42,11 +45,14 @@ public class RegionMerger {
             System.out.println("--areaCenterZ=<z>       Set the center of the area along the Z axis (only for area mode) (in chunks)");
             System.out.println("--areaRadius=<r>        Set the radius of the area (only for area mode) (in chunks)");
             System.out.println("--suppressAreaWarnings  Hide warnings for chunks with no inputs (only for area mode)");
+            System.out.println("--skipincomplete        Skip incomplete regions (only for merge mode)");
             System.out.println("--verbose   (-v)        Print more messages to your console (if you like spam ok)");
+            System.out.println("-j=<threads>            The number of worker threads (only for add mode, defaults to cpu count)");
             System.out.println();
             System.out.println("  Modes:  merge         Simply merges all chunks from all regions into the output");
             System.out.println("          area          Merges all chunks in a specified area into the output");
             System.out.println("          findmissing   Finds all chunks that aren't defined in an input and dumps them to a json file. Uses settings from area mode.");
+            System.out.println("          add           Add all the chunks from every input into the output world, without removing any");
             return;
         }
         Collection<File> inputDirs = new ArrayDeque<>();
@@ -55,8 +61,10 @@ public class RegionMerger {
         AtomicInteger areaCenterX = new AtomicInteger(0);
         AtomicInteger areaCenterZ = new AtomicInteger(0);
         AtomicInteger areaRadius = new AtomicInteger(-1);
+        AtomicInteger threads = new AtomicInteger(Runtime.getRuntime().availableProcessors());
         AtomicBoolean suppressAreaWarnings = new AtomicBoolean(false);
         AtomicBoolean verbose = new AtomicBoolean(false);
+        AtomicBoolean skipincomplete = new AtomicBoolean(false);
         for (String s : args) {
             if (s.startsWith("--input=")) {
                 File file = new File(s.split("=")[1]);
@@ -78,6 +86,7 @@ public class RegionMerger {
                     case "merge":
                     case "area":
                     case "findmissing":
+                    case "add":
                         break;
                     default: {
                         System.err.printf("Unknown mode: %s\n", mode);
@@ -108,10 +117,20 @@ public class RegionMerger {
                     System.err.printf("Invalid number: %s\n", s);
                     return;
                 }
+            } else if (s.startsWith("-j=")) {
+                s = s.split("=")[1];
+                try {
+                    threads.set(Integer.parseInt(s));
+                } catch (NumberFormatException e) {
+                    System.err.printf("Invalid number: %s\n", s);
+                    return;
+                }
             } else if ("--suppressAreaWarnings".equals(s)) {
                 suppressAreaWarnings.set(true);
             } else if ("--verbose".equals(s) || "-v".equals(s)) {
                 verbose.set(true);
+            } else if ("--skipincomplete".equals(s)) {
+                skipincomplete.set(true);
             } else {
                 System.err.printf("Invalid argument: \"%s\"\n", s);
                 return;
@@ -137,16 +156,16 @@ public class RegionMerger {
                 Map<Pos, Collection<World>> poslookup = new Hashtable<>();
                 worlds.forEach(w -> w.ownedRegions.forEach(p -> {
                     poslookup.computeIfAbsent(p, x -> new ArrayDeque<>()).add(w);
-                    totalRegions.incrementAndGet();
                 }));
                 System.out.printf("Loaded %d worlds with a total of %d different regions\n", worlds.size(), poslookup.size());
 
-                if (verbose.get())  {
+                totalRegions.set(poslookup.size());
+                if (verbose.get()) {
                     new Thread(() -> {
-                        while (currentRegion.get() < totalRegions.get())  {
+                        while (currentRegion.get() < totalRegions.get()) {
                             try {
                                 Thread.sleep(2000L);
-                            } catch (InterruptedException e)    {
+                            } catch (InterruptedException e) {
                                 throw new RuntimeException(e);
                             }
                             System.out.printf("Current progess: copying region %d/%d\n", currentRegion.get(), totalRegions.get());
@@ -157,39 +176,67 @@ public class RegionMerger {
                 poslookup.forEach((ThrowingBiConsumer<? super Pos, ? super Collection<World>, IOException>) (pos, viableWorlds) -> {
                     viableWorlds.forEach(world -> regionFiles.add(world.getRegion(pos)));
                     RegionFile out = outWorld.getRegion(pos, false);
-                    for (int x = 31; x >= 0; x--) {
-                        for (int z = 31; z >= 0; z--) {
-                            regionFilesChunk.clear();
-                            int x1 = x;
-                            int z1 = z;
-                            regionFiles.forEach(f -> {
-                                if (f.hasChunk(x1, z1)) {
-                                    regionFilesChunk.add(f);
+                    RUN:
+                    {
+                        FILELOOP:
+                        for (RegionFile file : regionFiles) {
+                            for (int x = 31; x >= 0; x--) {
+                                for (int z = 31; z >= 0; z--) {
+                                    if (!file.hasChunk(x, z)) {
+                                        continue FILELOOP;
+                                    }
                                 }
-                            });
-                            if (regionFilesChunk.isEmpty()) {
-                                if (verbose.get())  {
-                                    System.out.printf("Warning: Chunk (%d,%d) in region (%d,%d) not found!\n", x, z, pos.x, pos.z);
+                            }
+                            //if we've gotten here, the region has all chunks and we can copy it directly
+                            out.close();
+                            OutputStream os = new FileOutputStream(out.fileName);
+                            InputStream is = new FileInputStream(file.fileName);
+                            byte[] buffer = BUFFER_CACHE.get();
+                            int len;
+                            while ((len = is.read(buffer)) != -1) {
+                                os.write(buffer, 0, len);
+                            }
+                            is.close();
+                            os.close();
+                            break RUN;
+                        }
+                        if (skipincomplete.get()) {
+                            break RUN;
+                        }
+                        for (int x = 31; x >= 0; x--) {
+                            for (int z = 31; z >= 0; z--) {
+                                regionFilesChunk.clear();
+                                int x1 = x;
+                                int z1 = z;
+                                regionFiles.forEach(f -> {
+                                    if (f.hasChunk(x1, z1)) {
+                                        regionFilesChunk.add(f);
+                                    }
+                                });
+                                if (regionFilesChunk.isEmpty()) {
+                                    if (verbose.get()) {
+                                        System.out.printf("Warning: Chunk (%d,%d) in region (%d,%d) not found!\n", x, z, pos.x, pos.z);
+                                    }
+                                } else {
+                                    Iterator<RegionFile> iterator = regionFilesChunk.stream().sorted(Comparator.comparingLong(RegionFile::lastModified)).iterator();
+                                    RegionFile r = iterator.next();
+                                    OutputStream os = out.getChunkDataOutputStream(x, z);
+                                    InputStream is = r.getChunkDataInputStream(x, z);
+                                    if (is == null) {
+                                        throw new NullPointerException(String.format("Illegal chunk (%d,%d) in region %s", x, z, r.fileName.getAbsolutePath()));
+                                    }
+                                    byte[] buffer = BUFFER_CACHE.get();
+                                    int len;
+                                    while ((len = is.read(buffer)) != -1) {
+                                        os.write(buffer, 0, len);
+                                    }
+                                    is.close();
+                                    os.close();
                                 }
-                            } else {
-                                Iterator<RegionFile> iterator = regionFilesChunk.stream().sorted(Comparator.comparingLong(RegionFile::lastModified)).iterator();
-                                RegionFile r = iterator.next();
-                                OutputStream os = out.getChunkDataOutputStream(x, z);
-                                InputStream is = r.getChunkDataInputStream(x, z);
-                                if (is == null) {
-                                    throw new NullPointerException(String.format("Illegal chunk (%d,%d) in region %s", x, z, r.fileName.getAbsolutePath()));
-                                }
-                                byte[] buffer = BUFFER_CACHE.get();
-                                int len;
-                                while ((len = is.read(buffer)) != -1) {
-                                    os.write(buffer, 0, len);
-                                }
-                                is.close();
-                                os.close();
                             }
                         }
+                        out.close();
                     }
-                    out.close();
                     for (RegionFile file : regionFiles) {
                         file.close();
                     }
@@ -199,7 +246,7 @@ public class RegionMerger {
 
                 try {
                     Thread.sleep(2250L);
-                } catch (InterruptedException e)    {
+                } catch (InterruptedException e) {
                     throw new RuntimeException(e);
                 }
             }
@@ -233,12 +280,12 @@ public class RegionMerger {
                 long totalSize = 0L;
                 System.out.printf("Copying %d chunks...\n", totalChunks.get());
 
-                if (verbose.get())  {
+                if (verbose.get()) {
                     new Thread(() -> {
-                        while (currentChunk.get() < totalChunks.get())  {
+                        while (currentChunk.get() < totalChunks.get()) {
                             try {
                                 Thread.sleep(2000L);
-                            } catch (InterruptedException e)    {
+                            } catch (InterruptedException e) {
                                 throw new RuntimeException(e);
                             }
                             System.out.printf("Current progess: copying chunk %d/%d\n", currentChunk.get(), totalChunks.get());
@@ -279,8 +326,8 @@ public class RegionMerger {
                                 System.out.printf("Copied chunk (%02d,%02d) in region (%04d,%04d)    %d/%d\n", chunkPos.x, chunkPos.z, regionPos.x, regionPos.z, currentChunk.get(), totalChunks.get());
                             }
                         }
-                        if (inputFileDependencies.get(regionPos).decrementAndGet() <= 0)    {
-                            if (verbose.get())  {
+                        if (inputFileDependencies.get(regionPos).decrementAndGet() <= 0) {
+                            if (verbose.get()) {
                                 System.out.printf("Removing all open files for region (%04d,%04d)\n", regionPos.x, regionPos.z);
                             }
                             inputFileCache.remove(regionPos).forEach((ThrowingConsumer<RegionFile, IOException>) RegionFile::close);
@@ -290,7 +337,7 @@ public class RegionMerger {
 
                 try {
                     Thread.sleep(2250L);
-                } catch (InterruptedException e)    {
+                } catch (InterruptedException e) {
                     throw new RuntimeException(e);
                 }
 
@@ -342,6 +389,106 @@ public class RegionMerger {
                 try (OutputStream os = new FileOutputStream(new File(".", "missingchunks.json"))) {
                     os.write(json);
                 }
+            }
+            break;
+            case "add": {
+                AtomicInteger totalRegions = new AtomicInteger(0);
+                AtomicInteger currentRegion = new AtomicInteger(0);
+                AtomicBoolean running = new AtomicBoolean(true);
+                Map<Pos, Collection<World>> poslookup = new Hashtable<>();
+                worlds.forEach(w -> w.ownedRegions.forEach(p -> {
+                    poslookup.computeIfAbsent(p, x -> new ArrayDeque<>()).add(w);
+                }));
+                System.out.printf("Loaded %d worlds with a total of %d different regions\n", worlds.size(), poslookup.size());
+
+                totalRegions.set(poslookup.size());
+                if (verbose.get()) {
+                    new Thread(() -> {
+                        while (running.get()) {
+                            try {
+                                Thread.sleep(2000L);
+                            } catch (InterruptedException e) {
+                                throw new RuntimeException(e);
+                            }
+                            System.out.printf("Current progess: copying region %d/%d\n", currentRegion.get(), totalRegions.get());
+                        }
+                    }).start();
+                }
+
+                poslookup.entrySet().parallelStream().forEach((ThrowingConsumer<Map.Entry<Pos, Collection<World>>, IOException>) entry -> {
+                    Pos pos = entry.getKey();
+                    RegionFile outFile = outWorld.getRegionOrNull(pos);
+                    if (outFile != null) {
+                        CHECK:
+                        {
+                            for (int x = 31; x >= 0; x--) {
+                                for (int z = 31; z >= 0; z--) {
+                                    if (!outFile.hasChunk(x, z)) {
+                                        break CHECK;
+                                    }
+                                }
+                            }
+                            outFile.close();
+                            if (verbose.get()) {
+                                System.out.printf("Skipping region (%d,%d) because it's already complete\n", pos.x, pos.z);
+                            }
+                            return;
+                        }
+                    }
+                    Collection<World> potentialWorlds = entry.getValue();
+                    Collection<RegionFile> regionFiles1 = potentialWorlds.stream()
+                            .map(world -> world.getRegionOrNull(pos))
+                            .filter(Objects::nonNull)
+                            .sorted(Comparator.comparingLong(RegionFile::lastModified))
+                            .collect(Collectors.toCollection(ArrayDeque::new));
+                    RUN:
+                    {
+                        LOOP:
+                        for (RegionFile file : regionFiles1) {
+                            for (int x = 31; x >= 0; x--) {
+                                for (int z = 31; z >= 0; z--) {
+                                    if (!file.hasChunk(x, z)) {
+                                        continue LOOP;
+                                    }
+                                }
+                            }
+                            File f;
+                            if (outFile == null) {
+                                f = outWorld.getActualFileForRegion(pos);
+                            } else {
+                                outFile.close();
+                                f = outFile.fileName;
+                                outFile.fileName.delete();
+                            }
+                            file.close();
+                            try (DataInputStream is = new DataInputStream(new FileInputStream(file.fileName));
+                                 OutputStream os = new FileOutputStream(f)) {
+                                byte[] buf = BUFFER_CACHE.get();
+                                is.readFully(buf, 0, (int) file.fileName.length());
+                                os.write(buf);
+                            }
+                            break RUN;
+                        }
+                        if (outFile == null)    {
+                            outFile = outWorld.getOrCreateRegion(pos);
+                        }
+                        COPY:
+                        for (int x = 31; x >= 0; x--) {
+                            for (int z = 31; z >= 0; z--) {
+                                COPY_FILE:
+                                for (RegionFile file : regionFiles1) {
+                                    if (file.hasChunk(x, z))    {
+
+                                        break COPY_FILE;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    outFile.close();
+                    regionFiles1.forEach((ThrowingConsumer<RegionFile, IOException>) RegionFile::close);
+                    currentRegion.incrementAndGet();
+                });
             }
             break;
             default: {
