@@ -29,6 +29,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 public class RegionMerger {
@@ -152,6 +153,7 @@ public class RegionMerger {
 
         switch (mode) {
             case "merge": {
+                AtomicBoolean running = new AtomicBoolean(true);
                 AtomicInteger totalRegions = new AtomicInteger(0);
                 AtomicInteger currentRegion = new AtomicInteger(0);
                 Map<Pos, Collection<World>> poslookup = new Hashtable<>();
@@ -163,13 +165,13 @@ public class RegionMerger {
                 totalRegions.set(poslookup.size());
                 if (verbose.get()) {
                     new Thread(() -> {
-                        while (currentRegion.get() < totalRegions.get()) {
+                        while (running.get()) {
+                            System.out.printf("Current progess: copying region %d/%d\n", currentRegion.get(), totalRegions.get());
                             try {
                                 Thread.sleep(2000L);
                             } catch (InterruptedException e) {
                                 throw new RuntimeException(e);
                             }
-                            System.out.printf("Current progess: copying region %d/%d\n", currentRegion.get(), totalRegions.get());
                         }
                     }).start();
                 }
@@ -245,11 +247,7 @@ public class RegionMerger {
                     currentRegion.incrementAndGet();
                 });
 
-                try {
-                    Thread.sleep(2250L);
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
+                running.set(false);
             }
             break;
             case "area": {
@@ -263,6 +261,7 @@ public class RegionMerger {
                 int Z = areaCenterZ.get() - rad;
                 int ZZ = Z + (rad << 1);
 
+                AtomicBoolean running = new AtomicBoolean(true);
                 AtomicInteger totalChunks = new AtomicInteger(0);
                 AtomicInteger currentChunk = new AtomicInteger(0);
                 for (int x = X; x <= XX; x++) {
@@ -283,13 +282,13 @@ public class RegionMerger {
 
                 if (verbose.get()) {
                     new Thread(() -> {
-                        while (currentChunk.get() < totalChunks.get()) {
+                        while (running.get()) {
+                            System.out.printf("Current progess: copying chunk %d/%d\n", currentChunk.get(), totalChunks.get());
                             try {
                                 Thread.sleep(2000L);
                             } catch (InterruptedException e) {
                                 throw new RuntimeException(e);
                             }
-                            System.out.printf("Current progess: copying chunk %d/%d\n", currentChunk.get(), totalChunks.get());
                         }
                     }).start();
                 }
@@ -336,18 +335,14 @@ public class RegionMerger {
                     }
                 }
 
-                try {
-                    Thread.sleep(2250L);
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
+                running.set(false);
 
                 System.out.println("Closing files...");
                 outputFileCache.values().forEach((ThrowingConsumer<RegionFile, IOException>) RegionFile::close);
                 inputFileCache.values().forEach(c -> c.forEach((ThrowingConsumer<RegionFile, IOException>) RegionFile::close));
 
                 startTime = System.currentTimeMillis() - startTime;
-                System.out.printf("Copied %d chunks (%d bytes, %.2f MB) in %dh:%dm:%ds\n", totalChunks.get(), totalSize, (float) totalSize / (1024.0f * 1024.0f), startTime / (1000L * 60L * 60L), startTime / (1000L * 60L), startTime / 1000L);
+                System.out.printf("Copied %d chunks (%d bytes, %.2f MB) in %dh:%dm:%ds\n", totalChunks.get(), totalSize, (float) totalSize / (1024.0f * 1024.0f), startTime / (1000L * 60L * 60L), startTime / (1000L * 60L) % 60, startTime / 1000L % 60);
             }
             break;
             case "findmissing": {
@@ -399,6 +394,8 @@ public class RegionMerger {
             }
             break;
             case "add": {
+                long time = System.currentTimeMillis();
+                AtomicLong totalSize = new AtomicLong(0L);
                 AtomicInteger totalRegions = new AtomicInteger(0);
                 AtomicInteger currentRegion = new AtomicInteger(0);
                 AtomicBoolean running = new AtomicBoolean(true);
@@ -412,12 +409,12 @@ public class RegionMerger {
                 if (verbose.get()) {
                     new Thread(() -> {
                         while (running.get()) {
+                            System.out.printf("Current progess: copying region %d/%d\n", currentRegion.get(), totalRegions.get());
                             try {
                                 Thread.sleep(2000L);
                             } catch (InterruptedException e) {
                                 throw new RuntimeException(e);
                             }
-                            System.out.printf("Current progess: copying region %d/%d\n", currentRegion.get(), totalRegions.get());
                         }
                     }).start();
                 }
@@ -471,8 +468,10 @@ public class RegionMerger {
                             try (DataInputStream is = new DataInputStream(new FileInputStream(file.fileName));
                                  OutputStream os = new FileOutputStream(f)) {
                                 byte[] buf = BUFFER_CACHE.get();
-                                is.readFully(buf, 0, (int) file.fileName.length());
+                                long filelen = file.fileName.length();
+                                is.readFully(buf, 0, (int) filelen);
                                 os.write(buf);
+                                totalSize.addAndGet(filelen);
                             }
                             break RUN;
                         }
@@ -492,6 +491,7 @@ public class RegionMerger {
                                             int len;
                                             while ((len = is.read(buf)) != -1) {
                                                 os.write(buf, 0, len);
+                                                totalSize.addAndGet(len);
                                             }
                                         }
                                         break;
@@ -500,10 +500,24 @@ public class RegionMerger {
                             }
                         }
                     }
-                    outFile.close();
+                    if (outFile != null)    {
+                        outFile.close();
+                    }
                     regionFiles1.forEach((ThrowingConsumer<RegionFile, IOException>) RegionFile::close);
                     currentRegion.incrementAndGet();
                 });
+                running.set(false);
+                time = System.currentTimeMillis() - time;
+                System.out.printf(
+                        "Added %d regions (%.2f MB) in %dh:%dm:%ds at %.2fMB/s (%.2f regions/s)\n",
+                        totalRegions.get(),
+                        (float) totalSize.get() / (1024.0f * 1024.0f),
+                        time / (1000L * 60L * 60L),
+                        time / (1000L * 60L) % 60,
+                        time / (1000L) % 60,
+                        ((float) totalSize.get() / (1024.0f * 1024.0f)) / (float) (time / (1000L) % 60),
+                        (float) totalRegions.get() / (float) (time / (1000L) % 60)
+                );
             }
             break;
             default: {
