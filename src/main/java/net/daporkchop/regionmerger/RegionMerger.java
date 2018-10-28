@@ -8,6 +8,7 @@ import net.daporkchop.regionmerger.util.Pos;
 import net.daporkchop.regionmerger.util.RegionFile;
 import net.daporkchop.regionmerger.util.ThrowingBiConsumer;
 import net.daporkchop.regionmerger.util.ThrowingConsumer;
+import net.daporkchop.regionmerger.util.ThrowingFunction;
 
 import java.io.DataInputStream;
 import java.io.File;
@@ -35,7 +36,7 @@ public class RegionMerger {
 
     public static void main(String... args) throws IOException {
         if (args.length == 0 || (args.length == 1 && "--help".equals(args[0]))) {
-            System.out.println("PorkRegionMerger v0.0.4");
+            System.out.println("PorkRegionMerger v0.0.5");
             System.out.println();
             System.out.println("--help                  Show this help message");
             System.out.println("--input=<path>          Add an input directory, must be a path to the root of a Minecraft save");
@@ -365,7 +366,13 @@ public class RegionMerger {
                 int ZZ = Z + (rad << 1);
                 for (int x = X; x <= XX; x++) {
                     for (int z = Z; z <= ZZ; z++) {
-                        RegionFile file = regionFileCache.computeIfAbsent(new Pos(x >> 5, z >> 5), world::getRegionOrNull);
+                        RegionFile file = regionFileCache.computeIfAbsent(new Pos(x >> 5, z >> 5), (ThrowingFunction<Pos, RegionFile, IOException>) pos -> {
+                            RegionFile r = world.getRegionOrNull(pos);
+                            if (r != null)  {
+                                r.close();
+                            }
+                            return r;
+                        });
                         if (file == null || !file.hasChunk(x & 0x1F, z & 0x1F)) {
                             if (!suppressAreaWarnings.get()) {
                                 System.out.printf("Chunk (%d,%d) in region (%d,%d) not found!\n", x & 0x1F, z & 0x1F, x >> 5, z >> 5);
@@ -472,14 +479,22 @@ public class RegionMerger {
                         if (outFile == null)    {
                             outFile = outWorld.getOrCreateRegion(pos);
                         }
-                        COPY:
                         for (int x = 31; x >= 0; x--) {
                             for (int z = 31; z >= 0; z--) {
-                                COPY_FILE:
+                                if (outFile.hasChunk(x, z)) {
+                                    continue;
+                                }
                                 for (RegionFile file : regionFiles1) {
                                     if (file.hasChunk(x, z))    {
-
-                                        break COPY_FILE;
+                                        try (DataInputStream is = new DataInputStream(file.getChunkDataInputStream(x, z));
+                                            OutputStream os = outFile.getChunkDataOutputStream(x, z))   {
+                                            byte[] buf = BUFFER_CACHE.get();
+                                            int len;
+                                            while ((len = is.read(buf)) != -1) {
+                                                os.write(buf, 0, len);
+                                            }
+                                        }
+                                        break;
                                     }
                                 }
                             }
