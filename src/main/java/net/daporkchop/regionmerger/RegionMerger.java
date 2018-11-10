@@ -8,7 +8,6 @@ import net.daporkchop.regionmerger.util.Pos;
 import net.daporkchop.regionmerger.util.RegionFile;
 import net.daporkchop.regionmerger.util.ThrowingBiConsumer;
 import net.daporkchop.regionmerger.util.ThrowingConsumer;
-import net.daporkchop.regionmerger.util.ThrowingFunction;
 
 import java.io.DataInputStream;
 import java.io.File;
@@ -46,6 +45,10 @@ public class RegionMerger {
             System.out.println("--areaCenterX=<x>       Set the center of the area along the X axis (only for area mode) (in chunks)");
             System.out.println("--areaCenterZ=<z>       Set the center of the area along the Z axis (only for area mode) (in chunks)");
             System.out.println("--areaRadius=<r>        Set the radius of the area (only for area mode) (in chunks)");
+            System.out.println("--findMinX=<minX>       Set the min X coord to check (only for findmissing mode) (in regions) (inclusive)");
+            System.out.println("--findMinZ=<minZ>       Set the min Z coord to check (only for findmissing mode) (in regions) (inclusive)");
+            System.out.println("--findMaxX=<minX>       Set the max X coord to check (only for findmissing mode) (in regions) (inclusive)");
+            System.out.println("--findMaxZ=<minZ>       Set the max Z coord to check (only for findmissing mode) (in regions) (inclusive)");
             System.out.println("--suppressAreaWarnings  Hide warnings for chunks with no inputs (only for area mode)");
             System.out.println("--skipincomplete        Skip incomplete regions (only for merge mode)");
             System.out.println("--verbose   (-v)        Print more messages to your console (if you like spam ok)");
@@ -62,6 +65,10 @@ public class RegionMerger {
         String mode = "merge";
         AtomicInteger areaCenterX = new AtomicInteger(0);
         AtomicInteger areaCenterZ = new AtomicInteger(0);
+        AtomicInteger findMinX = new AtomicInteger(0);
+        AtomicInteger findMinZ = new AtomicInteger(0);
+        AtomicInteger findMaxX = new AtomicInteger(0);
+        AtomicInteger findMaxZ = new AtomicInteger(0);
         AtomicInteger areaRadius = new AtomicInteger(-1);
         AtomicInteger threads = new AtomicInteger(Runtime.getRuntime().availableProcessors());
         AtomicBoolean suppressAreaWarnings = new AtomicBoolean(false);
@@ -89,11 +96,44 @@ public class RegionMerger {
                     case "area":
                     case "findmissing":
                     case "add":
+                    case "removeoutlying":
                         break;
                     default: {
                         System.err.printf("Unknown mode: %s\n", mode);
                         return;
                     }
+                }
+            } else if (s.startsWith("--findMinX=")) {
+                s = s.split("=")[1];
+                try {
+                    findMinX.set(Integer.parseInt(s));
+                } catch (NumberFormatException e) {
+                    System.err.printf("Invalid number: %s\n", s);
+                    return;
+                }
+            } else if (s.startsWith("--findMinZ=")) {
+                s = s.split("=")[1];
+                try {
+                    findMinZ.set(Integer.parseInt(s));
+                } catch (NumberFormatException e) {
+                    System.err.printf("Invalid number: %s\n", s);
+                    return;
+                }
+            } else if (s.startsWith("--findMaxX=")) {
+                s = s.split("=")[1];
+                try {
+                    findMaxX.set(Integer.parseInt(s));
+                } catch (NumberFormatException e) {
+                    System.err.printf("Invalid number: %s\n", s);
+                    return;
+                }
+            } else if (s.startsWith("--findMaxZ=")) {
+                s = s.split("=")[1];
+                try {
+                    findMaxZ.set(Integer.parseInt(s));
+                } catch (NumberFormatException e) {
+                    System.err.printf("Invalid number: %s\n", s);
+                    return;
                 }
             } else if (s.startsWith("--areaCenterX=")) {
                 s = s.split("=")[1];
@@ -141,11 +181,11 @@ public class RegionMerger {
         if (inputDirs.isEmpty()) {
             System.err.println("No inputs specified!");
             return;
-        } else if (outputDir == null && !"findmissing".equals(mode)) {
+        } else if (outputDir == null && !("findmissing".equals(mode) || "removeoutlying".equals(mode))) {
             System.err.println("No output specified!");
             return;
         }
-        World outWorld = "findmissing".equals(mode) ? null : new World(outputDir);
+        World outWorld = ("findmissing".equals(mode) || "removeoutlying".equals(mode)) ? null : new World(outputDir);
         Collection<World> worlds = new ArrayDeque<>();
         inputDirs.forEach(f -> worlds.add(new World(f)));
         Collection<RegionFile> regionFiles = new ArrayDeque<>();
@@ -350,44 +390,40 @@ public class RegionMerger {
                     System.err.printf("Mode 'findmissing' requires exactly one input, but found %d\n", worlds.size());
                     return;
                 }
-                Map<Pos, RegionFile> regionFileCache = new Hashtable<>();
                 World world = ((ArrayDeque<World>) worlds).element();
                 Set<Pos> missingPositions = new HashSet<>();
 
-                int rad = areaRadius.get();
-                int X = areaCenterX.get() - rad;
-                int XX = X + (rad << 1);
-                int Z = areaCenterZ.get() - rad;
-                int ZZ = Z + (rad << 1);
-                for (int x = X; x <= XX; x++) {
-                    for (int z = Z; z <= ZZ; z++) {
-                        RegionFile file = regionFileCache.computeIfAbsent(new Pos(x >> 5, z >> 5), (ThrowingFunction<Pos, RegionFile, IOException>) pos -> {
-                            RegionFile r = world.getRegionOrNull(pos);
-                            if (r != null)  {
-                                r.close();
+                for (int x = findMinX.get(); x <= findMaxX.get(); x++) {
+                    for (int z = findMinZ.get(); z <= findMaxZ.get(); z++) {
+                        RegionFile file = world.getRegionOrNull(new Pos(x, z));
+                        if (file == null) {
+                            for (int xx = 31; xx >= 0; xx--) {
+                                for (int zz = 31; zz >= 0; zz--) {
+                                    missingPositions.add(new Pos((x << 5) + xx, (z << 5) + zz));
+                                }
                             }
-                            return r;
-                        });
-                        if (file == null || !file.hasChunk(x & 0x1F, z & 0x1F)) {
-                            if (!suppressAreaWarnings.get()) {
-                                System.out.printf("Chunk (%d,%d) in region (%d,%d) not found!\n", x & 0x1F, z & 0x1F, x >> 5, z >> 5);
+                        } else {
+                            file.close();
+                            for (int xx = 31; xx >= 0; xx--) {
+                                for (int zz = 31; zz >= 0; zz--) {
+                                    if (!file.hasChunk(xx, zz)) {
+                                        missingPositions.add(new Pos((x << 5) + xx, (z << 5) + zz));
+                                    }
+                                }
                             }
-                            missingPositions.add(new Pos(x, z));
                         }
                     }
                 }
-                regionFileCache.values().forEach((ThrowingConsumer<RegionFile, IOException>) RegionFile::close);
                 JsonArray array = new JsonArray();
-                missingPositions.forEach(pos -> {
+                missingPositions.stream().map(pos -> {
                     JsonObject object = new JsonObject();
                     object.addProperty("x", pos.x);
                     object.addProperty("z", pos.z);
-                    array.add(object);
-                });
-                Gson gson = new GsonBuilder()
-                        .setPrettyPrinting()
-                        .create();
-                byte[] json = gson.toJson(array).getBytes(Charset.forName("UTF-8"));
+                    return object;
+                }).forEach(array::add);
+                byte[] json = new GsonBuilder()
+                        //.setPrettyPrinting()
+                        .create().toJson(array).getBytes(Charset.forName("UTF-8"));
                 try (OutputStream os = new FileOutputStream(new File(".", "missingchunks.json"))) {
                     os.write(json);
                 }
@@ -468,14 +504,14 @@ public class RegionMerger {
                             try (DataInputStream is = new DataInputStream(new FileInputStream(file.fileName));
                                  OutputStream os = new FileOutputStream(f)) {
                                 byte[] buf = BUFFER_CACHE.get();
-                                long filelen = file.fileName.length();
-                                is.readFully(buf, 0, (int) filelen);
-                                os.write(buf);
+                                int filelen = (int) file.fileName.length();
+                                is.readFully(buf, 0, filelen);
+                                os.write(buf, 0, filelen);
                                 totalSize.addAndGet(filelen);
                             }
                             break RUN;
                         }
-                        if (outFile == null)    {
+                        if (outFile == null) {
                             outFile = outWorld.getOrCreateRegion(pos);
                         }
                         for (int x = 31; x >= 0; x--) {
@@ -484,9 +520,9 @@ public class RegionMerger {
                                     continue;
                                 }
                                 for (RegionFile file : regionFiles1) {
-                                    if (file.hasChunk(x, z))    {
+                                    if (file.hasChunk(x, z)) {
                                         try (DataInputStream is = new DataInputStream(file.getChunkDataInputStream(x, z));
-                                            OutputStream os = outFile.getChunkDataOutputStream(x, z))   {
+                                             OutputStream os = outFile.getChunkDataOutputStream(x, z)) {
                                             byte[] buf = BUFFER_CACHE.get();
                                             int len;
                                             while ((len = is.read(buf)) != -1) {
@@ -500,7 +536,7 @@ public class RegionMerger {
                             }
                         }
                     }
-                    if (outFile != null)    {
+                    if (outFile != null) {
                         outFile.close();
                     }
                     regionFiles1.forEach((ThrowingConsumer<RegionFile, IOException>) RegionFile::close);
@@ -515,9 +551,41 @@ public class RegionMerger {
                         time / (1000L * 60L * 60L),
                         time / (1000L * 60L) % 60,
                         time / (1000L) % 60,
-                        ((float) totalSize.get() / (1024.0f * 1024.0f)) / (float) (time / (1000L) % 60),
-                        (float) totalRegions.get() / (float) (time / (1000L) % 60)
+                        ((float) totalSize.get() / (1024.0f * 1024.0f)) / (float) (time / 1000L),
+                        (float) totalRegions.get() / (float) (time / 1000L)
                 );
+            }
+            break;
+            case "removeoutlying":  {
+                if (worlds.size() != 1) {
+                    System.err.printf("Mode 'findmissing' requires exactly one input, but found %d\n", worlds.size());
+                    return;
+                }
+                World world = ((ArrayDeque<World>) worlds).element();
+                int removed = 0;
+                long removedSize = 0L;
+
+                Collection<Pos> positionsInRange = new HashSet<>();
+                for (int x = findMinX.get(); x <= findMaxX.get(); x++) {
+                    for (int z = findMinZ.get(); z <= findMaxZ.get(); z++) {
+                        positionsInRange.add(new Pos(x, z));
+                    }
+                }
+                for (File f : world.regions.listFiles()) {
+                    String name = f.getName();
+                    if (name.endsWith(".mca") && name.startsWith("r.")) {
+                        String[] split = name.split("\\.");
+                        int x = Integer.parseInt(split[1]);
+                        int z = Integer.parseInt(split[2]);
+                        if (!positionsInRange.contains(new Pos(x, z)))  {
+                            removedSize += f.length();
+                            removed++;
+                            f.deleteOnExit();
+                        }
+                    }
+                }
+
+                System.out.printf("Removed %d regions, totalling %.2f MB\n", removed, (float) removedSize / (1024.0f * 1024.0f));
             }
             break;
             default: {
