@@ -58,14 +58,39 @@ package net.daporkchop.regionmerger.util;
 
  */
 
+import net.daporkchop.lib.encoding.compression.EnumCompression;
+import net.daporkchop.lib.primitive.map.IntegerObjectMap;
+import net.daporkchop.lib.primitive.map.hashmap.IntegerObjectHashMap;
+
 import java.io.*;
 import java.util.ArrayList;
+import java.util.function.Function;
 import java.util.zip.*;
 
 public class RegionFile {
-
     private static final int VERSION_GZIP = 1;
     private static final int VERSION_DEFLATE = 2;
+
+    private static final int PORKIAN_VERSION_MASK = 0x80;
+    private static final int VERSION_RAW = PORKIAN_VERSION_MASK | 1;
+    private static final int VERSION_XZIP = PORKIAN_VERSION_MASK | 2;
+
+    private static final IntegerObjectMap<IOEFunction<InputStream, InputStream>> inflaterCreatorMap = new IntegerObjectHashMap<>();
+    private static final IntegerObjectMap<IOEFunction<OutputStream, OutputStream>> deflaterCreatorMap = new IntegerObjectHashMap<>();
+
+    static {
+        inflaterCreatorMap.put(VERSION_GZIP, GZIPInputStream::new);
+        deflaterCreatorMap.put(VERSION_GZIP, GZIPOutputStream::new);
+
+        inflaterCreatorMap.put(VERSION_DEFLATE, DeflaterInputStream::new);
+        deflaterCreatorMap.put(VERSION_DEFLATE, DeflaterOutputStream::new);
+
+        inflaterCreatorMap.put(VERSION_RAW, i -> i);
+        deflaterCreatorMap.put(VERSION_RAW, i -> i);
+
+        inflaterCreatorMap.put(VERSION_XZIP, EnumCompression.XZIP::inflateStream);
+        deflaterCreatorMap.put(VERSION_XZIP, EnumCompression.XZIP::compressStream);
+    }
 
     private static final int SECTOR_BYTES = 4096;
     private static final int SECTOR_INTS = SECTOR_BYTES / 4;
@@ -119,7 +144,7 @@ public class RegionFile {
 
             /* set up the available sector map */
             int nSectors = (int) file.length() / SECTOR_BYTES;
-            sectorFree = new ArrayList<Boolean>(nSectors);
+            sectorFree = new ArrayList<>(nSectors);
 
             for (int i = 0; i < nSectors; ++i) {
                 sectorFree.add(true);
@@ -213,23 +238,18 @@ public class RegionFile {
                 return null;
             }
 
-            byte version = file.readByte();
-            if (version == VERSION_GZIP) {
+            int version = file.readByte() & 0xFF;
+            IOEFunction<InputStream, InputStream> streamCreator = inflaterCreatorMap.get(version);
+            if (streamCreator == null)  {
+                debugln("READ", x, z, "unknown version " + version);
+                return null;
+            } else {
                 byte[] data = new byte[length - 1];
-                file.read(data);
-                DataInputStream ret = new DataInputStream(new GZIPInputStream(new ByteArrayInputStream(data)));
-                // debug("READ", x, z, " = found");
-                return ret;
-            } else if (version == VERSION_DEFLATE) {
-                byte[] data = new byte[length - 1];
-                file.read(data);
-                DataInputStream ret = new DataInputStream(new InflaterInputStream(new ByteArrayInputStream(data)));
-                // debug("READ", x, z, " = found");
-                return ret;
+                this.file.readFully(data);
+                InputStream in = new ByteArrayInputStream(data);
+                in = streamCreator.apply(in);
+                return new DataInputStream(in);
             }
-
-            debugln("READ", x, z, "unknown version " + version);
-            return null;
         } catch (IOException e) {
             debugln("READ", x, z, "exception");
             return null;
@@ -237,9 +257,19 @@ public class RegionFile {
     }
 
     public DataOutputStream getChunkDataOutputStream(int x, int z) {
-        if (outOfBounds(x, z)) return null;
+        return this.getChunkDataOutputStream(x, z, VERSION_DEFLATE);
+    }
 
-        return new DataOutputStream(new DeflaterOutputStream(new ChunkBuffer(x, z)));
+    public DataOutputStream getChunkDataOutputStream(int x, int z, int version) {
+        if (outOfBounds(x, z)) return null;
+        IOEFunction<OutputStream, OutputStream> streamCreator = deflaterCreatorMap.get(version);
+        if (streamCreator == null)  {
+            throw new IllegalArgumentException(String.format("Unknown compression version: %d", version));
+        }
+
+        OutputStream os = new ChunkBuffer(x, z, version);
+        os = streamCreator.apply(os);
+        return new DataOutputStream(os);
     }
 
     /*
@@ -247,21 +277,22 @@ public class RegionFile {
      * chunk is serializing -- only writes when serialization is over
      */
     class ChunkBuffer extends ByteArrayOutputStream {
-        private int x, z;
+        private int x, z, version;
 
-        public ChunkBuffer(int x, int z) {
+        public ChunkBuffer(int x, int z, int version) {
             super(8096); // initialize to 8KB
             this.x = x;
             this.z = z;
+            this.version = version;
         }
 
         public void close() {
-            RegionFile.this.write(x, z, buf, count);
+            RegionFile.this.write(this.x, this.z, this.buf, this.count, this.version);
         }
     }
 
     /* write a chunk at (x,z) with length bytes of data to disk */
-    protected synchronized void write(int x, int z, byte[] data, int length) {
+    protected synchronized void write(int x, int z, byte[] data, int length, int version) {
         try {
             int offset = getOffset(x, z);
             int sectorNumber = offset >> 8;
@@ -276,7 +307,7 @@ public class RegionFile {
             if (sectorNumber != 0 && sectorsAllocated == sectorsNeeded) {
                 /* we can simply overwrite the old sectors */
                 debug("SAVE", x, z, length, "rewrite");
-                write(sectorNumber, data, length);
+                write(sectorNumber, data, length, version);
             } else {
                 /* we need to allocate new sectors */
 
@@ -311,7 +342,7 @@ public class RegionFile {
                     for (int i = 0; i < sectorsNeeded; ++i) {
                         sectorFree.set(sectorNumber + i, false);
                     }
-                    write(sectorNumber, data, length);
+                    write(sectorNumber, data, length, version);
                 } else {
                     /*
                      * no free space large enough found -- we need to grow the
@@ -326,7 +357,7 @@ public class RegionFile {
                     }
                     sizeDelta += SECTOR_BYTES * sectorsNeeded;
 
-                    write(sectorNumber, data, length);
+                    write(sectorNumber, data, length, version);
                     setOffset(x, z, (sectorNumber << 8) | sectorsNeeded);
                 }
             }
@@ -337,11 +368,11 @@ public class RegionFile {
     }
 
     /* write a chunk data to the region file at specified sector number */
-    private void write(int sectorNumber, byte[] data, int length) throws IOException {
+    private void write(int sectorNumber, byte[] data, int length, int version) throws IOException {
         debugln(" " + sectorNumber);
         file.seek(sectorNumber * SECTOR_BYTES);
         file.writeInt(length + 1); // chunk length
-        file.writeByte(VERSION_DEFLATE); // chunk version number
+        file.writeByte((byte) version); // chunk version number
         file.write(data, 0, length); // chunk data
     }
 
