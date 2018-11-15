@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'io.franzbecker.gradle-lombok' version '1.14'
 }
 
 group 'net.daporkchop'
@@ -8,6 +9,7 @@ version '0.0.5'
 sourceCompatibility = 1.8
 
 repositories {
+    mavenLocal()
     maven {
         name = 'DaPorkchop_'
         url = 'https://maven.daporkchop.net/'
@@ -19,8 +21,11 @@ dependencies {
     testCompile group: 'junit', name: 'junit', version: '4.12'
 
     compile 'com.google.code.gson:gson:2.8.5'
-    compile 'net.daporkchop.lib:encoding:0.2.1-SNAPSHOT'
+    compile 'net.daporkchop.lib:binary:0.2.1-SNAPSHOT'
     compile 'net.daporkchop.lib:primitive:0.2.1-SNAPSHOT'
+    compile 'net.daporkchop.lib:nbt:0.2.0'
+    compile 'com.zaxxer:SparseBitSet:1.1'
+    compile 'com.flowpowered:flow-nbt:1.0.1-SNAPSHOT'
 }
 
 jar {
