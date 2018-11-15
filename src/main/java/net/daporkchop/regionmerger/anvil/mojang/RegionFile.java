@@ -1,4 +1,4 @@
-package net.daporkchop.regionmerger.util;
+package net.daporkchop.regionmerger.anvil.mojang;
 
 /*
  ** 2011 January 5
@@ -61,10 +61,10 @@ package net.daporkchop.regionmerger.util;
 import net.daporkchop.lib.encoding.compression.EnumCompression;
 import net.daporkchop.lib.primitive.map.IntegerObjectMap;
 import net.daporkchop.lib.primitive.map.hashmap.IntegerObjectHashMap;
+import net.daporkchop.regionmerger.util.IOEFunction;
 
 import java.io.*;
 import java.util.ArrayList;
-import java.util.function.Function;
 import java.util.zip.*;
 
 public class RegionFile {

@@ -1,14 +1,18 @@
-package net.daporkchop.regionmerger.util;
+package net.daporkchop.regionmerger.anvil.mojang;
 
 import com.zaxxer.sparsebits.SparseBitSet;
 import lombok.Getter;
 import lombok.NonNull;
+import net.daporkchop.lib.binary.stream.ByteBufferInputStream;
 import net.daporkchop.lib.encoding.compression.Compression;
 import net.daporkchop.lib.encoding.compression.CompressionHelper;
 import net.daporkchop.lib.primitive.map.ByteObjectMap;
 import net.daporkchop.lib.primitive.map.hashmap.ByteObjectHashMap;
 
-import java.io.*;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
@@ -18,7 +22,10 @@ import java.util.WeakHashMap;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.zip.*;
+import java.util.zip.DeflaterOutputStream;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
+import java.util.zip.InflaterInputStream;
 
 /**
  * @author DaPorkchop_
@@ -99,7 +106,7 @@ public class OverclockedRegionFile {
         this.channel = this.file.getChannel();
         this.index = this.channel.map(FileChannel.MapMode.READ_WRITE, 0, SECTOR_BYTES);
 
-        if (true) {
+        if (false) {
             this.file.seek(0L);
             System.out.printf("Vanilla: %d\n", this.file.readInt());
             System.out.printf("mmapped: %d\n", this.index.getInt(0));
@@ -133,8 +140,8 @@ public class OverclockedRegionFile {
             return null;
         }
 
-        Lock lock = this.getLock(x, z).readLock();
-        lock.lock();
+        ReadWriteLock lock = this.getLock(x, z);
+        lock.readLock().lock();
         try {
             int sectorNumber = offset >> 8;
             int numSectors = offset & 0xFF;
@@ -143,23 +150,19 @@ public class OverclockedRegionFile {
             this.channel.read(buffer, sectorNumber * SECTOR_BYTES);
             buffer.flip();
             int length = buffer.getInt();
-            buffer.limit(length);
+            //TODO: is this needed lol
+            // buffer.limit(length);
             byte version = buffer.get();
-            /*this.file.seek(sectorNumber * SECTOR_BYTES);
-            int length = this.file.readInt();
-            byte version = this.file.readByte();*/
             CompressionHelper compression = COMPRESSION_IDS.get(version);
             if (compression == null) {
-                throw new IOException(String.format("Found invalid chunk version: %d", version % 0xFF));
-            } else {
+                throw new IOException(String.format("Found invalid chunk version: %d", version & 0xFF));
+            }/* else {
                 System.out.printf("[DEBUG] Chunk (%d,%d) is using compression: %s\n", x, z, compression);
-            }
-            /*byte[] b = new byte[length - 1];
-            this.file.readFully(b);*/
+            }*/
+            //System.out.printf("Data length: %d, sectors length: %d\n", length, sectorNumber * SECTOR_BYTES);
             return compression.inflate(new ByteBufferInputStream(buffer));
-            //return compression.inflate(new ByteArrayInputStream(b));
         } finally {
-            lock.unlock();
+            lock.readLock().unlock();
         }
     }
 
@@ -187,83 +190,5 @@ public class OverclockedRegionFile {
         this.index.force();
         this.channel.close();
         this.file.close();
-    }
-
-    private static final class ByteBufferInputStream extends InputStream {
-        private final ByteBuffer bb;
-
-        private ByteBufferInputStream(ByteBuffer var1) {
-            this.bb = var1;
-        }
-
-        public int read() throws IOException {
-            if (this.bb == null) {
-                throw new IOException("read on a closed InputStream");
-            } else {
-                return this.bb.remaining() == 0 ? -1 : this.bb.get() & 255;
-            }
-        }
-
-        public int read(byte[] var1) throws IOException {
-            if (this.bb == null) {
-                throw new IOException("read on a closed InputStream");
-            } else {
-                return this.read(var1, 0, var1.length);
-            }
-        }
-
-        public int read(byte[] var1, int var2, int var3) throws IOException {
-            if (this.bb == null) {
-                throw new IOException("read on a closed InputStream");
-            } else if (var1 == null) {
-                throw new NullPointerException();
-            } else if (var2 >= 0 && var3 >= 0 && var3 <= var1.length - var2) {
-                if (var3 == 0) {
-                    return 0;
-                } else {
-                    int var4 = Math.min(this.bb.remaining(), var3);
-                    if (var4 == 0) {
-                        return -1;
-                    } else {
-                        this.bb.get(var1, var2, var4);
-                        return var4;
-                    }
-                }
-            } else {
-                throw new IndexOutOfBoundsException();
-            }
-        }
-
-        public long skip(long var1) throws IOException {
-            if (this.bb == null) {
-                throw new IOException("skip on a closed InputStream");
-            } else if (var1 <= 0L) {
-                return 0L;
-            } else {
-                int var3 = (int) var1;
-                int var4 = Math.min(this.bb.remaining(), var3);
-                this.bb.position(this.bb.position() + var4);
-                return (long) var3;
-            }
-        }
-
-        public int available() throws IOException {
-            if (this.bb == null) {
-                throw new IOException("available on a closed InputStream");
-            } else {
-                return this.bb.remaining();
-            }
-        }
-
-        public synchronized void mark(int var1) {
-        }
-
-        public synchronized void reset() throws IOException {
-            throw new IOException("mark/reset not supported");
-        }
-
-        public boolean markSupported() {
-            return false;
-        }
     }
 }

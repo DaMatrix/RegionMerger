@@ -1,11 +1,10 @@
 package net.daporkchop.regionmerger;
 
-import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.daporkchop.regionmerger.util.Pos;
-import net.daporkchop.regionmerger.util.RegionFile;
+import net.daporkchop.regionmerger.anvil.mojang.RegionFile;
 import net.daporkchop.regionmerger.util.ThrowingBiConsumer;
 import net.daporkchop.regionmerger.util.ThrowingConsumer;
 

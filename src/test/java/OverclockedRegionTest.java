@@ -5,7 +5,7 @@ import net.daporkchop.lib.nbt.tag.impl.notch.CompoundTag;
 import net.daporkchop.lib.nbt.tag.impl.notch.IntArrayTag;
 import net.daporkchop.lib.nbt.tag.impl.notch.ListTag;
 import net.daporkchop.regionmerger.World;
-import net.daporkchop.regionmerger.util.OverclockedRegionFile;
+import net.daporkchop.regionmerger.anvil.mojang.OverclockedRegionFile;
 import net.daporkchop.regionmerger.util.Pos;
 import org.junit.Test;
 
