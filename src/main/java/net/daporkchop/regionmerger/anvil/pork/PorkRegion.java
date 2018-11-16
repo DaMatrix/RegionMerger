@@ -48,13 +48,13 @@ public class PorkRegion {
 
     static {
         COMPRESSION_IDS.put((byte) 0, Compression.NONE);
-        COMPRESSION_IDS.put((byte) 1, Compression.GZIP_LOW);
+        //COMPRESSION_IDS.put((byte) 1, Compression.GZIP_LOW);
         COMPRESSION_IDS.put((byte) 2, Compression.GZIP_NORMAL);
         COMPRESSION_IDS.put((byte) 3, Compression.GZIP_HIGH);
         COMPRESSION_IDS.put((byte) 4, Compression.BZIP2_LOW);
         COMPRESSION_IDS.put((byte) 5, Compression.BZIP2_NORMAL);
         COMPRESSION_IDS.put((byte) 6, Compression.BZIP2_HIGH);
-        COMPRESSION_IDS.put((byte) 7, Compression.DEFLATE_LOW);
+        //COMPRESSION_IDS.put((byte) 7, Compression.DEFLATE_LOW);
         COMPRESSION_IDS.put((byte) 8, Compression.DEFLATE_NORMAL);
         COMPRESSION_IDS.put((byte) 9, Compression.DEFLATE_HIGH);
         COMPRESSION_IDS.put((byte) 10, Compression.LZ4_BLOCK);
@@ -76,10 +76,12 @@ public class PorkRegion {
     private final Map<Integer, ReadWriteLock> locks = Collections.synchronizedMap(new WeakHashMap<>());
 
     private final RandomAccessFile file;
+    private final File theFile;
     private final FileChannel channel;
     private final MappedByteBuffer index;
 
     public PorkRegion(@NonNull File file) throws IOException {
+        this.theFile = file;
         if (file.exists()) {
             if (!file.isFile()) {
                 throw new IllegalArgumentException(String.format("Not a file: %s", file.getAbsolutePath()));
@@ -102,7 +104,7 @@ public class PorkRegion {
             }
             //more of a sanity check here
             long length;
-            while ((length = this.file.length()) < FULL_HEADER_SIZE || (length & (SECTOR_BYTES - 1)) != 0) {
+            while ((length = this.file.length()) < FULL_HEADER_SIZE/* || (length & (SECTOR_BYTES - 1)) != 0*/) {
                 this.file.write(0);
             }
         }
@@ -142,9 +144,9 @@ public class PorkRegion {
             CompressionHelper compression = COMPRESSION_IDS.get((byte) (version & 0x7F));
             if (compression == null) {
                 throw new IOException(String.format("Found invalid chunk version: %d", version & 0xFF));
-            } else {
+            }/* else {
                 System.out.printf("[DEBUG] Chunk (%d,%d) is using compression: %s\n", x, z, compression);
-            }
+            }*/
             return compression.inflate(new ByteBufferInputStream(buffer));
         } finally {
             lock.readLock().unlock();
@@ -278,6 +280,10 @@ public class PorkRegion {
         return this.file.length();
     }
 
+    public File getFile()   {
+        return this.theFile;
+    }
+
     private final class RegionOutput extends OutputStream {
         private final ReadWriteLock lock;
         private final int x;
@@ -309,6 +315,7 @@ public class PorkRegion {
 
         private void update(boolean finished) {
             if (this.current != null) {
+                this.current.flip();
                 this.buffers.add(this.current);
             }
             if (!finished) {

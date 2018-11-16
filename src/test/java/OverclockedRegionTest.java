@@ -17,12 +17,13 @@ import java.io.InputStream;
  * @author DaPorkchop_
  */
 public class OverclockedRegionTest {
-    private static final File inputDir = new File("Z:\\Minecraft\\2b2t\\testworld");
+    //private static final File inputDir = new File("Z:\\Minecraft\\2b2t\\testworld");
+    private static final File inputDir = new File("Z:\\Minecraft\\2b2t\\WorldCompressionComparison\\Spawn_PorkAnvil_v1_Uncompressed_(Default)");
 
     @Test
     public void test() throws IOException {
         World world = new World(inputDir);
-        OverclockedRegionFile regionFile = new OverclockedRegionFile(world.getActualFileForRegion(new Pos(0, 0)));
+        OverclockedRegionFile regionFile = new OverclockedRegionFile(world.getActualFileForRegion(new Pos(9, -10)));
         for (int x = 31; x >= 0; x--) {
             for (int z = 31; z >= 0; z--) {
                 InputStream is = regionFile.readData(0, 0);
