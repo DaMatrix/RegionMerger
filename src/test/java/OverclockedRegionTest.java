@@ -1,9 +1,6 @@
 import lombok.NonNull;
 import net.daporkchop.lib.nbt.NBTIO;
-import net.daporkchop.lib.nbt.tag.impl.notch.ByteArrayTag;
-import net.daporkchop.lib.nbt.tag.impl.notch.CompoundTag;
-import net.daporkchop.lib.nbt.tag.impl.notch.IntArrayTag;
-import net.daporkchop.lib.nbt.tag.impl.notch.ListTag;
+import net.daporkchop.lib.nbt.tag.impl.notch.*;
 import net.daporkchop.regionmerger.World;
 import net.daporkchop.regionmerger.anvil.mojang.OverclockedRegionFile;
 import net.daporkchop.regionmerger.util.Pos;
@@ -18,7 +15,7 @@ import java.io.InputStream;
  */
 public class OverclockedRegionTest {
     //private static final File inputDir = new File("Z:\\Minecraft\\2b2t\\testworld");
-    private static final File inputDir = new File("Z:\\Minecraft\\2b2t\\WorldCompressionComparison\\Spawn_PorkAnvil_v1_Uncompressed_(Default)");
+    private static final File inputDir = new File("Z:\\Minecraft\\2b2t\\WorldCompressionComparison\\Spawn_MojangAnvil");
 
     @Test
     public void test() throws IOException {
@@ -58,6 +55,12 @@ public class OverclockedRegionTest {
                 System.out.printf("%sbyte[]: %s (%d bytes)\n", this.space(depth), name, ((ByteArrayTag) subtag).getValue().length);
             } else if (subtag instanceof IntArrayTag) {
                 System.out.printf("%sint[]: %s (%d ints)\n", this.space(depth), name, ((IntArrayTag) subtag).getValue().length);
+            } else if (subtag instanceof IntTag) {
+                System.out.printf("%sint: %s (%d)\n", this.space(depth), name, ((IntTag) subtag).getValue());
+            } else if (subtag instanceof ByteTag) {
+                System.out.printf("%sbyte: %s (%d)\n", this.space(depth), name, ((ByteTag) subtag).getValue() & 0xFF);
+            } else if (subtag instanceof LongTag) {
+                System.out.printf("%slong: %s (%d)\n", this.space(depth), name, ((LongTag) subtag).getValue());
             } else {
                 System.out.printf("%sOther: %s (class=%s)\n", this.space(depth), name, subtag.getClass().getCanonicalName());
             }

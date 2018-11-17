@@ -2,7 +2,7 @@ package net.daporkchop.regionmerger.anvil.pork;
 
 import com.zaxxer.sparsebits.SparseBitSet;
 import lombok.NonNull;
-import net.daporkchop.lib.binary.stream.ByteBufferInputStream;
+import net.daporkchop.lib.binary.stream.DataIn;
 import net.daporkchop.lib.encoding.compression.Compression;
 import net.daporkchop.lib.encoding.compression.CompressionHelper;
 import net.daporkchop.lib.primitive.map.ByteObjectMap;
@@ -115,6 +115,17 @@ public class PorkRegion {
         for (int i = 0; i < 6; i++) {
             this.occupiedSectors.set(i);
         }
+        //find and mark occupied data sectors
+        for (int x = SIZE - 1; x >= 0; x--)  {
+            for (int z = SIZE - 1; z >= 0; z--) {
+                long l = this.getOffset(x, z);
+                int offset = (int) (l >> 24L);
+                int sectors = (int) ((l >> 8L) & 0xFFFFL);
+                for (int i = 0; i < sectors; i++)   {
+                    this.occupiedSectors.set(offset + i);
+                }
+            }
+        }
     }
 
     private static void ensureInBounds(int x, int z) {
@@ -147,7 +158,7 @@ public class PorkRegion {
             }/* else {
                 System.out.printf("[DEBUG] Chunk (%d,%d) is using compression: %s\n", x, z, compression);
             }*/
-            return compression.inflate(new ByteBufferInputStream(buffer));
+            return compression.inflate(DataIn.wrap(buffer));
         } finally {
             lock.readLock().unlock();
         }

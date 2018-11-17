@@ -1,15 +1,9 @@
 package net.daporkchop.regionmerger.anvil.pork;
 
 import lombok.NonNull;
-import lombok.RequiredArgsConstructor;
-import net.daporkchop.lib.binary.stream.ByteBufferOutputStream;
 import net.daporkchop.lib.binary.stream.DataOut;
 import net.daporkchop.lib.encoding.compression.Compression;
-import net.daporkchop.lib.primitive.function.bifunction.IntegerObjectObjectBiFunction;
 import net.daporkchop.regionmerger.RegionMerger;
-import net.daporkchop.regionmerger.util.IOEFunction;
-import net.daporkchop.regionmerger.util.Pos;
-import net.daporkchop.regionmerger.util.ThrowingBiConsumer;
 
 import java.io.*;
 import java.nio.ByteBuffer;
@@ -44,10 +38,10 @@ public class PorkAnvilArchive {
         }
         this.file = new RandomAccessFile(file, "rw");
         this.file.write(compressionId & 0xFF);
-        OutputStream out = new BufferedChannelOutput(bufferSize, this.file.getChannel());
+        OutputStream out = new BufferedChannelOutput(bufferSize, this.file.getChannel(), 9L);
         //out = mode.outputCreator.apply(bufferSize, out);
         out = PorkRegion.COMPRESSION_IDS.getOrDefault((byte) compressionId, Compression.NONE).deflate(out);
-        this.out = new DataOut(out);
+        this.out = DataOut.wrap(out);
     }
 
     public void writeRegion(int x, int z, @NonNull InputStream[] inputs) throws IOException {
@@ -56,8 +50,8 @@ public class PorkAnvilArchive {
         }
         this.writeLock.lock();
         try {
-            for (int xx = 31; xx >= 0; xx--)    {
-                for (int zz = 31; zz >= 0; zz--)    {
+            for (int xx = 31; xx >= 0; xx--) {
+                for (int zz = 31; zz >= 0; zz--) {
                     InputStream in = inputs[(xx << 5) | zz];
                     if (in == null) {
                         continue;
@@ -125,17 +119,22 @@ public class PorkAnvilArchive {
         private final IntegerObjectObjectBiFunction<IOEFunction<OutputStream, OutputStream>, ThrowingBiConsumer<Pos, InputStream[], IOException>> outputCreator;
     }*/
 
-    private static class BufferedChannelOutput extends OutputStream {
+    public static class BufferedChannelOutput extends OutputStream {
         private final ByteBuffer buffer;
         private final int size;
         private final FileChannel channel;
         private AtomicInteger off = new AtomicInteger();
-        private AtomicLong fileOff = new AtomicLong(9L);
+        private AtomicLong fileOff;
 
-        private BufferedChannelOutput(int bufferSize, @NonNull FileChannel channel) {
+        public BufferedChannelOutput(int bufferSize, @NonNull FileChannel channel) {
+            this(bufferSize, channel, 0L);
+        }
+
+        public BufferedChannelOutput(int bufferSize, @NonNull FileChannel channel, long offset) {
             this.buffer = ByteBuffer.allocateDirect(bufferSize);
             this.size = bufferSize;
             this.channel = channel;
+            this.fileOff = new AtomicLong(offset);
         }
 
         @Override
@@ -148,7 +147,7 @@ public class PorkAnvilArchive {
 
         @Override
         public void flush() throws IOException {
-            this.off.set(0);
+            this.buffer.limit(this.off.getAndSet(0));
             //this.buffer.flip();
             this.channel.write(this.buffer, this.fileOff.getAndAdd(this.buffer.limit()));
             this.buffer.clear();

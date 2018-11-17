@@ -3,23 +3,17 @@ package net.daporkchop.regionmerger.anvil.mojang;
 import com.zaxxer.sparsebits.SparseBitSet;
 import lombok.Getter;
 import lombok.NonNull;
-import net.daporkchop.lib.binary.stream.ByteBufferInputStream;
-import net.daporkchop.lib.encoding.compression.Compression;
+import net.daporkchop.lib.binary.stream.DataIn;
 import net.daporkchop.lib.encoding.compression.CompressionHelper;
 import net.daporkchop.lib.primitive.map.ByteObjectMap;
 import net.daporkchop.lib.primitive.map.hashmap.ByteObjectHashMap;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.RandomAccessFile;
+import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
-import java.util.Collections;
-import java.util.Map;
-import java.util.WeakHashMap;
-import java.util.concurrent.locks.Lock;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.zip.DeflaterOutputStream;
@@ -50,7 +44,7 @@ public class OverclockedRegionFile {
                 .build());
 
         //new things
-        COMPRESSION_IDS.put((byte) 0, Compression.NONE);
+        /*COMPRESSION_IDS.put((byte) 0, Compression.NONE);
         COMPRESSION_IDS.put((byte) 3, Compression.GZIP_LOW);
         COMPRESSION_IDS.put((byte) 4, Compression.GZIP_NORMAL);
         COMPRESSION_IDS.put((byte) 5, Compression.GZIP_HIGH);
@@ -63,7 +57,7 @@ public class OverclockedRegionFile {
         COMPRESSION_IDS.put((byte) 12, Compression.LZ4_BLOCK);
         COMPRESSION_IDS.put((byte) 13, Compression.LZMA_LOW);
         COMPRESSION_IDS.put((byte) 14, Compression.LZMA_NORMAL);
-        COMPRESSION_IDS.put((byte) 15, Compression.LZMA_HIGH);
+        COMPRESSION_IDS.put((byte) 15, Compression.LZMA_HIGH);*/
 
         for (int i = INTEGER_LOOKUP.length - 1; i >= 0; i--) {
             INTEGER_LOOKUP[i] = i;
@@ -78,6 +72,7 @@ public class OverclockedRegionFile {
     @Getter
     private final long lastModified;
     private final Map<Integer, ReadWriteLock> locks = Collections.synchronizedMap(new WeakHashMap<>());
+    private final ReadWriteLock sectorsLock = new ReentrantReadWriteLock();
 
     public OverclockedRegionFile(@NonNull File file) throws IOException {
         if (file.exists()) {
@@ -156,13 +151,107 @@ public class OverclockedRegionFile {
             CompressionHelper compression = COMPRESSION_IDS.get(version);
             if (compression == null) {
                 throw new IOException(String.format("Found invalid chunk version: %d", version & 0xFF));
-            }/* else {
+            } else if (false) {
                 System.out.printf("[DEBUG] Chunk (%d,%d) is using compression: %s\n", x, z, compression);
-            }*/
+            }
             //System.out.printf("Data length: %d, sectors length: %d\n", length, sectorNumber * SECTOR_BYTES);
-            return compression.inflate(new ByteBufferInputStream(buffer));
+            return compression.inflate(DataIn.wrap(buffer));
         } finally {
             lock.readLock().unlock();
+        }
+    }
+
+    public OutputStream write(int x, int z, @NonNull CompressionHelper compression) throws IOException {
+        AtomicInteger i = new AtomicInteger(-1);
+        COMPRESSION_IDS.forEach((id, helper) -> {
+            if (helper == compression) {
+                i.set(id & 0xFF);
+            }
+        });
+        if (i.get() == -1) {
+            throw new IllegalArgumentException(String.format("Unregistered compression format: %s", compression));
+        } else {
+            return this.write(x, z, i.get());
+        }
+    }
+
+    public OutputStream write(int x, int z, int compressionId) throws IOException {
+        ensureInBounds(x, z);
+
+        CompressionHelper compression = COMPRESSION_IDS.get((byte) compressionId);
+        if (compression == null) {
+            throw new IllegalArgumentException(String.format("Invalid compression id: %d", compressionId));
+        }
+
+        ReadWriteLock lock = this.getLock(x, z);
+        lock.writeLock().lock();
+        return compression.deflate(new RegionOutput(lock, x, z, compressionId));
+    }
+
+    private void doWrite(@NonNull RegionOutput output) throws IOException {
+        try {
+            int offset = this.getOffset(output.x, output.z);
+            int sectorOffsetOld = offset >> 8;
+            int numSectorsOld = offset & 0xFF;
+            int numSectors = output.buffers.size();
+            if ((numSectors & 0xFFFF) != numSectors) {
+                throw new IllegalStateException(String.format("Data too big! Would need %d sectors...", numSectors));
+            }
+            if (numSectors <= numSectorsOld) {
+                //we can write now
+                this.theActualRealDoWrite(sectorOffsetOld * SECTOR_BYTES, output.buffers);
+                if (numSectors < numSectorsOld) {
+                    //deallocate old sectors
+                    this.sectorsLock.writeLock().lock();
+                    try {
+                        for (int i = numSectors; i < numSectorsOld; i++) {
+                            this.occupiedSectors.clear(sectorOffsetOld + i);
+                        }
+                    } finally {
+                        this.sectorsLock.writeLock().unlock();
+                    }
+                }
+            } else if (numSectors > numSectorsOld) {
+                int sectorOffsetNew = -1;
+                this.sectorsLock.writeLock().lock();
+                try {
+                    //deallocate old sectors
+                    for (int i = 0; i < numSectorsOld; i++) {
+                        this.occupiedSectors.clear(sectorOffsetOld + i);
+                    }
+                    //allocate new ones
+                    int i = 0;
+                    SEARCH:
+                    do {
+                        i = this.occupiedSectors.nextClearBit(i);
+                        for (int j = 1; j < numSectors; j++) {
+                            //don't check first sector, that's why j starts at 1
+                            if (this.occupiedSectors.get(i + j)) {
+                                i += j;
+                                continue SEARCH;
+                            }
+                        }
+                        sectorOffsetNew = i;
+                        for (int j = 0; j < numSectors; j++) {
+                            this.occupiedSectors.set(i + j);
+                        }
+                    } while (sectorOffsetNew == -1);
+                } finally {
+                    this.sectorsLock.writeLock().unlock();
+                }
+                //write data and stuff
+                this.theActualRealDoWrite(sectorOffsetNew * SECTOR_BYTES, output.buffers);
+                this.setOffset(output.x, output.z, (sectorOffsetNew << 8) | (numSectors & 0xFF));
+            }
+        } finally {
+            output.lock.writeLock().unlock();
+        }
+    }
+
+    private void theActualRealDoWrite(long pos, @NonNull List<ByteBuffer> buffers) throws IOException {
+        for (ByteBuffer buffer : buffers) {
+            this.channel.write(buffer, pos);
+            pos += SECTOR_BYTES;
         }
     }
 
@@ -190,5 +279,50 @@ public class OverclockedRegionFile {
         this.index.force();
         this.channel.close();
         this.file.close();
+    }
+
+    private final class RegionOutput extends OutputStream {
+        private final ReadWriteLock lock;
+        private final int x;
+        private final int z;
+        private final int version;
+        private final List<ByteBuffer> buffers = new ArrayList<>();
+        private ByteBuffer current;
+
+        private RegionOutput(@NonNull ReadWriteLock lock, int x, int z, int version) {
+            this.lock = lock;
+            this.x = x;
+            this.z = z;
+            this.version = version;
+        }
+
+        @Override
+        public void write(int b) throws IOException {
+            if (this.current == null || this.current.position() == SECTOR_BYTES) {
+                this.update(false);
+            }
+            this.current.put((byte) b);
+        }
+
+        @Override
+        public void close() throws IOException {
+            this.update(true);
+            OverclockedRegionFile.this.doWrite(this);
+        }
+
+        private void update(boolean finished) {
+            if (this.current != null) {
+                this.current.flip();
+                this.buffers.add(this.current);
+            }
+            if (!finished) {
+                boolean flag = this.current == null;
+                this.current = ByteBuffer.allocateDirect(SECTOR_BYTES);
+                if (flag) {
+                    current.putInt(-1); //length
+                    current.put((byte) 2); //VERSION_DEFLATE
+                }
+            }
+        }
     }
 }
