@@ -4,9 +4,9 @@ import com.flowpowered.nbt.stream.NBTInputStream;
 import com.flowpowered.nbt.stream.NBTOutputStream;
 import de.schlichtherle.truezip.file.TFile;
 import de.schlichtherle.truezip.file.TFileOutputStream;
+import lombok.Getter;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
-import net.daporkchop.lib.binary.UTF8;
 import net.daporkchop.lib.binary.stream.DataIn;
 import net.daporkchop.lib.binary.stream.DataOut;
 import net.daporkchop.regionmerger.RegionMerger;
@@ -15,14 +15,12 @@ import net.daporkchop.regionmerger.anvil.mojang.OverclockedRegionFile;
 import net.daporkchop.regionmerger.anvil.pork.PorkAnvilArchive;
 import net.daporkchop.regionmerger.anvil.pork.ToPorkRegionConverter;
 import net.daporkchop.regionmerger.util.IOEFunction;
+import net.daporkchop.regionmerger.util.Pos;
 import net.daporkchop.regionmerger.util.ThrowingConsumer;
 import org.junit.Test;
 import org.tukaani.xz.*;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.io.RandomAccessFile;
+import java.io.*;
 import java.nio.BufferUnderflowException;
 import java.nio.channels.FileChannel;
 import java.util.Scanner;
@@ -157,113 +155,5 @@ public class PorkianWorldEncoderThing {
         File file = new File("Z:\\Minecraft\\2b2t\\WorldCompressionComparison\\porkarchive_v2_xz\\temp_1.xz");
         SeekableXZInputStream xzInputStream = new SeekableXZInputStream(new SeekableFileInputStream(file));
         DataIn in = DataIn.wrap(xzInputStream);
-    }
-
-    @Test
-    public void encodeToTARFormat() throws IOException {
-        World inWorld = ToPorkRegionConverter.inWorld;
-        TFile outFile = new TFile(String.format("Z:\\Minecraft\\2b2t\\WorldCompressionComparison\\porkarchive_v3_tar\\out_%d.tar", System.currentTimeMillis()));
-        //outFile.createNewFile();
-        if (false) {
-            try (OutputStream out = new TFileOutputStream(new TFile(outFile, "randomData"))) {
-                out.write(("I'd just like to interject for moment. What you're referring to as Linux, is in fact, GNU/Linux, or as I've recently taken to calling it, GNU plus Linux. Linux is not an operating system unto itself, but rather another free component of a fully functioning GNU system made useful by the GNU corelibs, shell utilities and vital system components comprising a full OS as defined by POSIX.\n" +
-                        "\n" +
-                        "Many computer users run a modified version of the GNU system every day, without realizing it. Through a peculiar turn of events, the version of GNU which is widely used today is often called Linux, and many of its users are not aware that it is basically the GNU system, developed by the GNU Project.\n" +
-                        "\n" +
-                        "There really is a Linux, and these people are using it, but it is just a part of the system they use. Linux is the kernel: the program in the system that allocates the machine's resources to the other programs that you run. The kernel is an essential part of an operating system, but useless by itself; it can only function in the context of a complete operating system. Linux is normally used in combination with the GNU operating system: the whole system is basically GNU with Linux added, or GNU/Linux. All the so-called Linux distributions are really distributions of GNU/Linux!\n" +
-                        "\n").getBytes(UTF8.utf8));
-            }
-        } else if (true) {
-            AtomicBoolean running = new AtomicBoolean(true);
-            {
-                Thread t = new Thread(() -> {
-                    try (Scanner scanner = new Scanner(System.in)) {
-                        scanner.nextLine();
-                    }
-                    running.set(false);
-                });
-                t.setDaemon(true);
-                t.start();
-            }
-            AtomicInteger counter = new AtomicInteger(0);
-            inWorld.ownedRegions.stream()
-                    .map(inWorld::getActualFileForRegion)
-                    .map((IOEFunction<File, OverclockedRegionFile>) OverclockedRegionFile::new)
-                    .forEach((ThrowingConsumer<OverclockedRegionFile, IOException>) inFile -> {
-                        try {
-                            if (!running.get()) {
-                                return;
-                            }
-                            //byte[] buf = RegionMerger.BUFFER_CACHE.get();
-                            try (OutputStream out = new OSWrapper(new TFileOutputStream(new TFile(outFile, String.valueOf(counter.getAndIncrement()))))) {
-                                DataOut dataOut = DataOut.wrap(out);
-                                //TODO: write region coords
-                                dataOut.writeVarInt(0); //x
-                                dataOut.writeVarInt(0); //z
-                                if (false){
-                                    int c = 0;
-                                    for (int x = 31; x >= 0; x--) {
-                                        for (int z = 31; z >= 0; z--) {
-                                            if (inFile.hasChunk(x, z)) {
-                                                c++;
-                                            }
-                                        }
-                                    }
-                                    dataOut.writeVarInt(c, true); //total chunk count
-                                }
-                                for (int x = 31; running.get() && x >= 0; x--) {
-                                    for (int z = 31; running.get() && z >= 0; z--) {
-                                        if (inFile.hasChunk(x, z)) {
-                                            try (NBTInputStream in = new NBTInputStream(inFile.readData(x, z), false);
-                                                 NBTOutputStream nbtOut = new NBTOutputStream(out, false)) {
-                                                CompoundTag tag = (CompoundTag) in.readTag();
-                                                //TODO: optimizations
-                                                dataOut.writeBoolean(true);
-                                                dataOut.write(x);
-                                                dataOut.write(z);
-                                                nbtOut.writeTag(tag);
-                                            } catch (BufferUnderflowException e)    {
-                                                e.printStackTrace();
-                                            }
-                                        }
-                                    }
-                                }
-                                dataOut.writeBoolean(false);
-                            }
-                        } finally {
-                            inFile.close();
-                        }
-                    });
-        }
-    }
-
-    @RequiredArgsConstructor
-    private static class OSWrapper extends OutputStream {
-        @NonNull
-        private final OutputStream out;
-
-        @Override
-        public void write(byte[] b) throws IOException {
-            this.out.write(b);
-        }
-
-        @Override
-        public void write(byte[] b, int off, int len) throws IOException {
-            this.out.write(b, off, len);
-        }
-
-        @Override
-        public void flush() throws IOException {
-            this.out.flush();
-        }
-
-        @Override
-        public void close() throws IOException {
-        }
-
-        @Override
-        public void write(int b) throws IOException {
-            this.out.write(b);
-        }
     }
 }

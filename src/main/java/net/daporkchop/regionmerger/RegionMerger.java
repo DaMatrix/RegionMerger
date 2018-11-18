@@ -32,6 +32,7 @@ import java.util.stream.Collectors;
 
 public class RegionMerger {
     public static final ThreadLocal<byte[]> BUFFER_CACHE = ThreadLocal.withInitial(() -> new byte[0xFFFFFF]);
+    public static final ThreadLocal<byte[]> BUFFER_CACHE_2 = ThreadLocal.withInitial(() -> new byte[0xFFFFFF]);
 
     public static void main(String... args) throws IOException {
         if (args.length == 0 || (args.length == 1 && "--help".equals(args[0]))) {

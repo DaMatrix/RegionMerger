@@ -24,7 +24,7 @@ import java.util.zip.InflaterInputStream;
 /**
  * @author DaPorkchop_
  */
-public class OverclockedRegionFile {
+public class OverclockedRegionFile implements AutoCloseable {
     public static final ByteObjectMap<CompressionHelper> COMPRESSION_IDS = new ByteObjectHashMap<>();
     private static final int CHUNK_HEADER_SIZE = 5;
     private static final int SECTOR_BYTES = 4096;
@@ -146,7 +146,7 @@ public class OverclockedRegionFile {
             buffer.flip();
             int length = buffer.getInt();
             //TODO: is this needed lol
-            // buffer.limit(length);
+            buffer.limit(length + 5);
             byte version = buffer.get();
             CompressionHelper compression = COMPRESSION_IDS.get(version);
             if (compression == null) {
@@ -275,6 +275,7 @@ public class OverclockedRegionFile {
         this.index.putInt(SECTOR_BYTES + (x + z * 32) * 4, value);
     }
 
+    @Override
     public void close() throws IOException {
         this.index.force();
         this.channel.close();

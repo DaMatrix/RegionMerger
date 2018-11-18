@@ -82,7 +82,7 @@ public class RegionFile {
         inflaterCreatorMap.put(VERSION_GZIP, GZIPInputStream::new);
         deflaterCreatorMap.put(VERSION_GZIP, GZIPOutputStream::new);
 
-        inflaterCreatorMap.put(VERSION_DEFLATE, DeflaterInputStream::new);
+        inflaterCreatorMap.put(VERSION_DEFLATE, InflaterInputStream::new);
         deflaterCreatorMap.put(VERSION_DEFLATE, DeflaterOutputStream::new);
 
         inflaterCreatorMap.put(VERSION_RAW, i -> i);
