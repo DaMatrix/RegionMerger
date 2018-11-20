@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public class ToPorkRegionConverter {
     public static final File input = new File("Z:\\Minecraft\\2b2t\\WorldCompressionComparison\\Spawn_MojangAnvil");
     public static final File output_root = new File("Z:\\Minecraft\\2b2t\\WorldCompressionComparison");
-    public static final World inWorld = new World(input);
+    public static final World inWorld = null;
 
     public static void main(String... args) {
         AtomicBoolean running = new AtomicBoolean(true);
@@ -177,7 +177,7 @@ public class ToPorkRegionConverter {
         }
     }
 
-    private static final void rm(@NonNull File file) {
+    public static final void rm(@NonNull File file) {
         if (!file.exists()) {
             return;
         }
