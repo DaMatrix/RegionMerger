@@ -4,6 +4,7 @@ import com.zaxxer.sparsebits.SparseBitSet;
 import lombok.Getter;
 import lombok.NonNull;
 import net.daporkchop.lib.binary.stream.DataIn;
+import net.daporkchop.lib.encoding.compression.Compression;
 import net.daporkchop.lib.encoding.compression.CompressionHelper;
 import net.daporkchop.lib.primitive.map.ByteObjectMap;
 import net.daporkchop.lib.primitive.map.hashmap.ByteObjectHashMap;
@@ -22,6 +23,11 @@ import java.util.zip.GZIPOutputStream;
 import java.util.zip.InflaterInputStream;
 
 /**
+ * A highly optimized rewrite of Mojang's original {@link RegionFile}, designed with backwards-compatibility in mind.
+ * <p>
+ * Of course, compression modes other than 1 and 2 (GZip and ZLIB respectively) won't work with a vanilla Minecraft implementation, so
+ * they should be avoided.
+ *
  * @author DaPorkchop_
  */
 public class OverclockedRegionFile implements AutoCloseable {
@@ -42,9 +48,10 @@ public class OverclockedRegionFile implements AutoCloseable {
                 .setInputStreamWrapperSimple(InflaterInputStream::new)
                 .setOutputStreamWrapperSimple(DeflaterOutputStream::new)
                 .build());
+        //COMPRESSION_IDS.put((byte) 2, Compression.DEFLATE_HIGH);
 
         //new things
-        /*COMPRESSION_IDS.put((byte) 0, Compression.NONE);
+        COMPRESSION_IDS.put((byte) 0, Compression.NONE);
         COMPRESSION_IDS.put((byte) 3, Compression.GZIP_LOW);
         COMPRESSION_IDS.put((byte) 4, Compression.GZIP_NORMAL);
         COMPRESSION_IDS.put((byte) 5, Compression.GZIP_HIGH);
@@ -57,7 +64,7 @@ public class OverclockedRegionFile implements AutoCloseable {
         COMPRESSION_IDS.put((byte) 12, Compression.LZ4_BLOCK);
         COMPRESSION_IDS.put((byte) 13, Compression.LZMA_LOW);
         COMPRESSION_IDS.put((byte) 14, Compression.LZMA_NORMAL);
-        COMPRESSION_IDS.put((byte) 15, Compression.LZMA_HIGH);*/
+        COMPRESSION_IDS.put((byte) 15, Compression.LZMA_HIGH);
 
         for (int i = INTEGER_LOOKUP.length - 1; i >= 0; i--) {
             INTEGER_LOOKUP[i] = i;
@@ -79,7 +86,7 @@ public class OverclockedRegionFile implements AutoCloseable {
             if (!file.isFile()) {
                 throw new IllegalArgumentException(String.format("Not a file: %s", file.getAbsolutePath()));
             }
-        } else if (!file.getParentFile().mkdirs() || !file.createNewFile()) {
+        } else if ((!file.getParentFile().exists() && !file.getParentFile().mkdirs()) || !file.createNewFile()) {
             throw new IllegalStateException(String.format("Unable to create file: %s", file.getAbsolutePath()));
         }
         this.lastModified = file.lastModified();

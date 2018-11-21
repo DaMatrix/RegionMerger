@@ -3,15 +3,13 @@ package net.daporkchop.regionmerger.anvil.pork.tar;
 import de.schlichtherle.truezip.file.TFile;
 import de.schlichtherle.truezip.file.TFileInputStream;
 import lombok.NonNull;
+import net.daporkchop.lib.binary.stream.DataIn;
 import net.daporkchop.lib.binary.stream.DataOut;
-import net.daporkchop.lib.common.util.PorkUtil;
 import net.daporkchop.regionmerger.RegionMerger;
 import net.daporkchop.regionmerger.World;
 import net.daporkchop.regionmerger.anvil.mojang.OverclockedRegionFile;
 import net.daporkchop.regionmerger.anvil.pork.ToPorkRegionConverter;
-import net.daporkchop.regionmerger.util.Pos;
-import net.daporkchop.regionmerger.util.ThreadLocalBufferedOutputStream;
-import net.daporkchop.regionmerger.util.ThrowingBiConsumer;
+import net.daporkchop.regionmerger.util.*;
 
 import java.io.*;
 import java.util.*;
@@ -80,15 +78,26 @@ public class ToTARConverter {
                 } else if (!out.mkdirs()) {
                     throw new IllegalStateException(String.format("Couldn't create directory: %s", out.getAbsolutePath()));
                 }
-                int exitCode = Runtime.getRuntime().exec(String.format("tar xf %s.tar.xz -C %s", in.getAbsolutePath(), out.getAbsolutePath())).waitFor();
+                int exitCode = new ProcessBuilder()
+                        .command("tar", "xf", in.getAbsolutePath())
+                        .directory(out)
+                        .start()
+                        .waitFor();
+                //int exitCode = Runtime.getRuntime().exec(String.format("tar xf %s.tar.xz -C %s", in.getAbsolutePath(), out.getAbsolutePath())).waitFor();
                 if (exitCode != 0) {
                     throw new IllegalStateException(String.format("Extractor exit code: %d", exitCode));
                 }
             };
         } catch (Exception e) {
-            System.out.printf("%s: native tar not found%s\n", force_native ? "Error" : "Warning", force_native ? "!" : ", using java implementation. This will lead to a serious decrease in performance.");
+            System.out.printf("%s: native tar not found%s\n", force_native ? "Error" : "Warning", force_native ? "!" : ", using java implementation. This will lead to a serious decrease in performance!!!");
             if (force_native) {
                 Runtime.getRuntime().exit(1);
+            }
+            System.out.println("Pausing for 10 seconds. If you wish to continue without native tar, please wait. Otherwise, please download and install something that adds tar to your system PATH (e.g. git-bash for Windows).");
+            try {
+                Thread.sleep(10000L);
+            } catch (InterruptedException e1) {
+                throw new RuntimeException(e1);
             }
             creator = (in, out) -> {
                 //in theory we could implement it using TrueZip and Apache commons compress, but it'd be so slow it wouldn't be worth it at all
@@ -98,7 +107,7 @@ public class ToTARConverter {
                 throw new UnsupportedOperationException("Creating tar.xz archive without native tar");
             };
             extractor = (in, out) -> {
-                TFile archiveFile = new TFile(String.format("%s.tar.xz", in.getAbsolutePath()));
+                TFile archiveFile = new TFile(in.getAbsolutePath());
                 if (out.exists() && !out.isDirectory()) {
                     throw new IllegalStateException(String.format("Not a directory: %s", out.getAbsolutePath()));
                 }
@@ -110,6 +119,9 @@ public class ToTARConverter {
             TAR_XZ_EXTRACTOR = extractor;
         }
         ToPorkRegionConverter.rm(TMP_DIR);
+        if (!TMP_DIR.mkdirs()) {
+            throw new IllegalStateException(String.format("Couldn't create directory: %s", TMP_DIR.getAbsolutePath()));
+        }
     }
 
     private static void ___doExtractTarRecursive(@NonNull TFile in, @NonNull File out) throws IOException {
@@ -169,19 +181,19 @@ public class ToTARConverter {
                 System.out.println("  -DtmpDir=<path>                  Give the path to the temporary file directory. Default=./tmp/");
                 System.out.println("  -Drun.size=<size>                The number of regions per run. Smaller values are faster but make compression less effective. Default=16");
             }
-            break;
+            return;
             case "a": {
-                if ((!OUTPUT_DIR.exists() && !OUTPUT_DIR.mkdirs()) || !OUTPUT_DIR.isDirectory())   {
+                if ((!OUTPUT_DIR.exists() && !OUTPUT_DIR.mkdirs()) || !OUTPUT_DIR.isDirectory()) {
                     throw new IllegalStateException(String.format("Couldn't create directory: %s", OUTPUT_DIR.getAbsolutePath()));
                 }
                 System.out.println("Archiving extra data...");
                 TAR_XZ_CREATOR_BULK.accept(
                         Arrays.stream(INPUT_DIR.listFiles())
-                        .filter(f -> {
-                            String name = f.getName();
-                            return !(name.startsWith("DIM") || name.equals("region"));
-                        })
-                        .collect(Collectors.toCollection(ArrayDeque::new)),
+                                .filter(f -> {
+                                    String name = f.getName();
+                                    return !(name.startsWith("DIM") || name.equals("region"));
+                                })
+                                .collect(Collectors.toCollection(ArrayDeque::new)),
                         new File(OUTPUT_DIR, "extra")
                 );
                 System.out.printf("Preparing to archive world %s...\n", INPUT_DIR.getAbsolutePath());
@@ -212,12 +224,12 @@ public class ToTARConverter {
                         File outDir = new File(runDir, String.format("r.%d.%d", regionPos.x, regionPos.z));
                         int counter = 0;
                         try (OverclockedRegionFile regionFile = new OverclockedRegionFile(theRegionFile)) {
-                            for (int x = 31; x >= 0; x--)   {
-                                for (int z = 31; z >= 0; z--)   {
+                            for (int x = 31; x >= 0; x--) {
+                                for (int z = 31; z >= 0; z--) {
                                     if (!regionFile.hasChunk(x, z)) {
                                         continue;
                                     }
-                                    if (!outDir.exists() && !outDir.mkdirs())   {
+                                    if (!outDir.exists() && !outDir.mkdirs()) {
                                         throw new IllegalStateException(String.format("Couldn't create directory: %s", outDir.getAbsolutePath()));
                                     }
                                     File chunkFile = new File(outDir, String.valueOf(counter++));
@@ -230,7 +242,7 @@ public class ToTARConverter {
                                         os.write(z);
                                         //TODO: more efficient encoding format
                                         int i;
-                                        while ((i = is.read(b)) != -1)   {
+                                        while ((i = is.read(b)) != -1) {
                                             os.write(b, 0, i);
                                         }
                                     }
@@ -245,16 +257,61 @@ public class ToTARConverter {
                     ToPorkRegionConverter.rm(runDir);
                     System.out.printf("Completed run %d!\n", runId);
                 });
-                //TAR_XZ_CREATOR.accept(new File("../src/"), OUTPUT_DIR);
             }
             break;
             case "x": {
-                TAR_XZ_EXTRACTOR.accept(INPUT_DIR, OUTPUT_DIR);
+                //TAR_XZ_EXTRACTOR.accept(INPUT_DIR, OUTPUT_DIR);
+                if (OUTPUT_DIR.exists()) {
+                    ToPorkRegionConverter.rm(OUTPUT_DIR);
+                }
+                if (!OUTPUT_DIR.mkdirs()) {
+                    throw new IllegalStateException(String.format("Couldn't create directory: %s", OUTPUT_DIR.getAbsolutePath()));
+                } else if (!new File(OUTPUT_DIR, "region").mkdir()) {
+                    throw new IllegalStateException("Couldn't create region directory!");
+                }
+                System.out.println("Extracting extra data...");
+                TAR_XZ_EXTRACTOR.accept(new File(INPUT_DIR, "extra.tar.xz"), OUTPUT_DIR);
+                System.out.printf("Preparing to extract world %s...\n", INPUT_DIR.getAbsolutePath());
+                Arrays.stream(INPUT_DIR.listFiles())
+                        .filter(file -> file.getName().startsWith("run_") && file.getName().endsWith(".tar.xz"))
+                        .parallel()
+                        .forEach((ThrowingConsumer<File, IOException>) archive -> {
+                            byte[] b = RegionMerger.BUFFER_CACHE.get();
+                            System.out.printf("Extracting run %s...\n", archive.getAbsolutePath());
+                            File outDir = new File(TMP_DIR, archive.getName().replace(".tar.xz", ""));
+                            TAR_XZ_EXTRACTOR.accept(archive, TMP_DIR);
+                            for (File regionDir : outDir.listFiles()) {
+                                int x;
+                                int z;
+                                {
+                                    String[] split = regionDir.getName().split("\\.");
+                                    x = Integer.parseInt(split[1]);
+                                    z = Integer.parseInt(split[2]);
+                                }
+                                try (OverclockedRegionFile regionFile = new OverclockedRegionFile(new File(OUTPUT_DIR, String.format("region/r.%d.%d.mca", x, z)))) {
+                                    for (File chunkFile : regionDir.listFiles()) {
+                                        try (DataIn in = DataIn.wrap(new CachedFileInput(chunkFile))) {
+                                            int chunkX = in.read();
+                                            int chunkZ = in.read();
+                                            try (OutputStream out = regionFile.write(chunkX, chunkZ, 2)) {
+                                                int i;
+                                                while ((i = in.read(b)) != -1) {
+                                                    out.write(b, 0, i);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            ToPorkRegionConverter.rm(outDir);
+                        });
             }
             break;
             default: {
                 System.out.printf("Unknown mode: %s\n", mode);
             }
+            return;
         }
+        System.out.println("Done!");
     }
 }
