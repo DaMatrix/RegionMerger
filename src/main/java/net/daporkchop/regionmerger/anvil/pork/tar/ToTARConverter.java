@@ -25,7 +25,7 @@ public class ToTARConverter {
     //
     // Constants
     //
-    private static final int REGIONS_PER_RUN = 2;
+    private static final int REGIONS_PER_RUN = Integer.parseInt(System.getProperty("run.size", "16"));
 
     //
     // Other static things
@@ -151,6 +151,7 @@ public class ToTARConverter {
                 System.out.println("  -Dinput=<path>                   Give the path to the input directory. Default=./in/");
                 System.out.println("  -Doutput=<path>                  Give the path to the output directory. Default=./out/");
                 System.out.println("  -DtmpDir=<path>                  Give the path to the temporary file directory. Default=./tmp/");
+                System.out.println("  -Drun.size=<size>                The number of regions per run. Smaller values are faster but make compression less effective. Default=16");
             }
             break;
             case "a": {
@@ -212,7 +213,7 @@ public class ToTARConverter {
                             throw new RuntimeException(e);
                         }
                     });
-                    System.out.printf("Compressing %d chunks for run %d...\n", fullRun.size(), runId);
+                    System.out.printf("Compressing %d regions for run %d...\n", fullRun.size(), runId);
                     TAR_XZ_CREATOR.accept(runDir, new File(OUTPUT_DIR, String.format("run_%05d", runId)));
                     ToPorkRegionConverter.rm(runDir);
                     System.out.printf("Completed run %d!\n", runId);
