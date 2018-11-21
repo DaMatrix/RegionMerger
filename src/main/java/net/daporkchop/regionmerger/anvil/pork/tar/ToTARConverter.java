@@ -17,6 +17,7 @@ import java.io.*;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 
 /**
  * @author DaPorkchop_
@@ -31,6 +32,7 @@ public class ToTARConverter {
     // Other static things
     //
     private static final ThrowingBiConsumer<File, File, Exception> TAR_XZ_CREATOR;
+    private static final ThrowingBiConsumer<Collection<File>, File, Exception> TAR_XZ_CREATOR_BULK;
     private static final ThrowingBiConsumer<File, File, Exception> TAR_XZ_EXTRACTOR;
     private static final File TMP_DIR = new File(System.getProperty("tmpDir", "./tmp/"));
     private static final File INPUT_DIR = new File(System.getProperty("input", "./in/"));
@@ -41,6 +43,7 @@ public class ToTARConverter {
         boolean force_java = System.getProperty("tar.forceJava", "false").equals("true");
 
         ThrowingBiConsumer<File, File, Exception> creator = null;
+        ThrowingBiConsumer<Collection<File>, File, Exception> creator_bulk = null;
         ThrowingBiConsumer<File, File, Exception> extractor = null;
         try {
             if (force_java) {
@@ -55,7 +58,16 @@ public class ToTARConverter {
                         .directory(in.getParentFile())
                         .start()
                         .waitFor();
-                //int exitCode = Runtime.getRuntime().exec(String.format("tar cfJ %s.tar.xz %s", out.getAbsolutePath(), in.getAbsolutePath())).waitFor();
+                if (exitCode != 0) {
+                    throw new IllegalStateException(String.format("Compressor exit code: %d", exitCode));
+                }
+            };
+            creator_bulk = (in, out) -> {
+                ProcessBuilder processBuilder = new ProcessBuilder()
+                        .command("tar", "cfJ", String.format("%s.tar.xz", out.getAbsolutePath()))
+                        .directory(in.iterator().next().getParentFile());
+                in.stream().map(File::getName).forEach(processBuilder.command()::add);
+                int exitCode = processBuilder.start().waitFor();
                 if (exitCode != 0) {
                     throw new IllegalStateException(String.format("Compressor exit code: %d", exitCode));
                 }
@@ -82,6 +94,9 @@ public class ToTARConverter {
                 //in theory we could implement it using TrueZip and Apache commons compress, but it'd be so slow it wouldn't be worth it at all
                 throw new UnsupportedOperationException("Creating tar.xz archive without native tar");
             };
+            creator_bulk = (in, out) -> {
+                throw new UnsupportedOperationException("Creating tar.xz archive without native tar");
+            };
             extractor = (in, out) -> {
                 TFile archiveFile = new TFile(String.format("%s.tar.xz", in.getAbsolutePath()));
                 if (out.exists() && !out.isDirectory()) {
@@ -91,6 +106,7 @@ public class ToTARConverter {
             };
         } finally {
             TAR_XZ_CREATOR = creator;
+            TAR_XZ_CREATOR_BULK = creator_bulk;
             TAR_XZ_EXTRACTOR = extractor;
         }
         ToPorkRegionConverter.rm(TMP_DIR);
@@ -158,6 +174,17 @@ public class ToTARConverter {
                 if ((!OUTPUT_DIR.exists() && !OUTPUT_DIR.mkdirs()) || !OUTPUT_DIR.isDirectory())   {
                     throw new IllegalStateException(String.format("Couldn't create directory: %s", OUTPUT_DIR.getAbsolutePath()));
                 }
+                System.out.println("Archiving extra data...");
+                TAR_XZ_CREATOR_BULK.accept(
+                        Arrays.stream(INPUT_DIR.listFiles())
+                        .filter(f -> {
+                            String name = f.getName();
+                            return !(name.startsWith("DIM") || name.equals("region"));
+                        })
+                        .collect(Collectors.toCollection(ArrayDeque::new)),
+                        new File(OUTPUT_DIR, "extra")
+                );
+                System.out.printf("Preparing to archive world %s...\n", INPUT_DIR.getAbsolutePath());
                 World inWorld = new World(INPUT_DIR);
                 List<Collection<Pos>> runs = new ArrayList<>();
                 {
