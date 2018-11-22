@@ -1,10 +1,14 @@
 plugins {
     id 'java'
     id 'io.franzbecker.gradle-lombok' version '1.14'
+    //id 'application'
 }
 
 group 'net.daporkchop'
-version '0.0.6-tarconverter'
+version '0.0.5'
+
+//mainClassName = "net.daporkchop.regionmerger.random.LocalRepoUpdate"
+//applicationDefaultJvmArgs = ["-Xmx4G", "-XX:+UseG1GC"]
 
 sourceCompatibility = 1.8
 
@@ -33,9 +37,15 @@ dependencies {
 
     compile 'org.jfree:jfreechart:1.5.0'
 
-    testCompile 'org.apache.maven.indexer:indexer-core:6.0.1-SNAPSHOT'
-    testCompile 'org.apache.maven.wagon:wagon-http:2.12'
-    testCompile 'org.eclipse.sisu:org.eclipse.sisu.plexus:0.3.3'
+    //TODO: remove all these dependencies i added from coding on the wrong project
+    compile 'org.apache.maven.indexer:indexer-core:6.0.1-SNAPSHOT'
+    compile 'org.apache.maven.wagon:wagon-http:2.12'
+    compile 'org.eclipse.sisu:org.eclipse.sisu.plexus:0.3.3'
+    compile 'org.eclipse.aether:aether-impl:1.1.0'
+    compile 'org.eclipse.aether:aether-connector-basic:1.1.0'
+    compile 'org.eclipse.aether:aether-transport-file:1.1.0'
+    compile 'org.eclipse.aether:aether-transport-http:1.1.0'
+    compile 'org.apache.maven:maven-aether-provider:3.3.9'
 }
 
 jar {
@@ -52,7 +62,8 @@ jar {
     manifest {
         attributes 'Implementation-Title': 'DaPorkchop_ok',
                 'Implementation-Version': version,
-                //'Main-Class': 'net.daporkchop.regionmerger.RegionMerger'
-                'Main-Class': 'net.daporkchop.regionmerger.anvil.pork.tar.ToTARConverter'
+                'Main-Class': 'net.daporkchop.regionmerger.RegionMerger'
+                //'Main-Class': 'net.daporkchop.regionmerger.random.LocalRepoUpdate'
+                //'Main-Class': 'net.daporkchop.regionmerger.anvil.pork.tar.ToTARConverter'
     }
 }
