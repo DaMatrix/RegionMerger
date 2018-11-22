@@ -67,7 +67,7 @@ import java.io.*;
 import java.util.ArrayList;
 import java.util.zip.*;
 
-public class RegionFile {
+public class RegionFile implements AutoCloseable {
     private static final int VERSION_GZIP = 1;
     private static final int VERSION_DEFLATE = 2;
 
@@ -88,8 +88,8 @@ public class RegionFile {
         inflaterCreatorMap.put(VERSION_RAW, i -> i);
         deflaterCreatorMap.put(VERSION_RAW, i -> i);
 
-        inflaterCreatorMap.put(VERSION_XZIP, EnumCompression.XZIP::inflateStream);
-        deflaterCreatorMap.put(VERSION_XZIP, EnumCompression.XZIP::compressStream);
+        //inflaterCreatorMap.put(VERSION_XZIP, EnumCompression.XZIP::inflateStream);
+        //deflaterCreatorMap.put(VERSION_XZIP, EnumCompression.XZIP::compressStream);
     }
 
     private static final int SECTOR_BYTES = 4096;
@@ -401,6 +401,7 @@ public class RegionFile {
         file.writeInt(value);
     }
 
+    @Override
     public void close() throws IOException {
         file.close();
     }

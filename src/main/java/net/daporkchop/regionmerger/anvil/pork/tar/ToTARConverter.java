@@ -8,6 +8,7 @@ import net.daporkchop.lib.binary.stream.DataOut;
 import net.daporkchop.regionmerger.RegionMerger;
 import net.daporkchop.regionmerger.World;
 import net.daporkchop.regionmerger.anvil.mojang.OverclockedRegionFile;
+import net.daporkchop.regionmerger.anvil.mojang.RegionFile;
 import net.daporkchop.regionmerger.anvil.pork.ToPorkRegionConverter;
 import net.daporkchop.regionmerger.util.*;
 
@@ -288,12 +289,13 @@ public class ToTARConverter {
                                     x = Integer.parseInt(split[1]);
                                     z = Integer.parseInt(split[2]);
                                 }
-                                try (OverclockedRegionFile regionFile = new OverclockedRegionFile(new File(OUTPUT_DIR, String.format("region/r.%d.%d.mca", x, z)))) {
+                                //try (OverclockedRegionFile regionFile = new OverclockedRegionFile(new File(OUTPUT_DIR, String.format("region/r.%d.%d.mca", x, z)))) {
+                                try (RegionFile regionFile = new RegionFile(new File(OUTPUT_DIR, String.format("region/r.%d.%d.mca", x, z)))) {
                                     for (File chunkFile : regionDir.listFiles()) {
                                         try (DataIn in = DataIn.wrap(new CachedFileInput(chunkFile))) {
                                             int chunkX = in.read();
                                             int chunkZ = in.read();
-                                            try (OutputStream out = regionFile.write(chunkX, chunkZ, 2)) {
+                                            try (OutputStream out = regionFile.getChunkDataOutputStream(chunkX, chunkZ, 2)) {
                                                 int i;
                                                 while ((i = in.read(b)) != -1) {
                                                     out.write(b, 0, i);

@@ -296,6 +296,7 @@ public class OverclockedRegionFile implements AutoCloseable {
         private final int version;
         private final List<ByteBuffer> buffers = new ArrayList<>();
         private ByteBuffer current;
+        private int size;
 
         private RegionOutput(@NonNull ReadWriteLock lock, int x, int z, int version) {
             this.lock = lock;
@@ -310,11 +311,13 @@ public class OverclockedRegionFile implements AutoCloseable {
                 this.update(false);
             }
             this.current.put((byte) b);
+            this.size++;
         }
 
         @Override
         public void close() throws IOException {
             this.update(true);
+            this.buffers.get(0).putInt(0, this.size);
             OverclockedRegionFile.this.doWrite(this);
         }
 
@@ -328,7 +331,7 @@ public class OverclockedRegionFile implements AutoCloseable {
                 this.current = ByteBuffer.allocateDirect(SECTOR_BYTES);
                 if (flag) {
                     current.putInt(-1); //length
-                    current.put((byte) 2); //VERSION_DEFLATE
+                    current.put((byte) this.version); //VERSION_DEFLATE
                 }
             }
         }
