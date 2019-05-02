@@ -52,7 +52,7 @@ public class RegionMerger implements Logging {
         logger.enableANSI();
         if (args.length == 0 || (args.length == 1 && "--help".equals(args[0]))) {
             logger.channel("Help")
-                  .info("PorkRegionMerger v0.0.5")
+                  .info("PorkRegionMerger v0.0.6")
                   .info()
                   .info("--help                  Show this help message")
                   .info("--input=<path>          Add an input directory, must be a path to the root of a Minecraft save")
@@ -68,7 +68,7 @@ public class RegionMerger implements Logging {
                   .info("--suppressAreaWarnings  Hide warnings for chunks with no inputs (only for area mode)")
                   .info("--skipincomplete        Skip incomplete regions (only for merge mode)")
                   .info("--forceoverwrite        Forces the merger to overwrite all currently present chunks (only for add mode)")
-                  .info("--inputorder            Makes the merger prioritize inputs based on their order in the input command rather than by file system date")
+                  .info("--inputorder            Prioritize inputs by their input order rather than by file age (only for add mode)")
                   .info("--verbose   (-v)        Print more messages to your console (if you like spam ok)")
                   .info("-j=<threads>            The number of worker threads (only for add mode, defaults to cpu count)")
                   .info()
@@ -389,7 +389,7 @@ public class RegionMerger implements Logging {
                             }
                         }
                         if (inputFileDependencies.get(regionPos).decrementAndGet() <= 0) {
-                                logger.trace("Removing all open files for region (%04d,%04d)", regionPos.x, regionPos.z);
+                            logger.trace("Removing all open files for region (%04d,%04d)", regionPos.x, regionPos.z);
                             inputFileCache.remove(regionPos).forEach((ThrowingConsumer<RegionFile, IOException>) RegionFile::close);
                         }
                     }
@@ -478,27 +478,30 @@ public class RegionMerger implements Logging {
                 poslookup.entrySet().parallelStream().forEach((ThrowingConsumer<Map.Entry<Pos, Collection<World>>, IOException>) entry -> {
                     Pos pos = entry.getKey();
                     RegionFile outFile = outWorld.getRegionOrNull(pos);
-                    if (outFile != null) {
-                        CHECK:
-                        {
-                            for (int x = 31; x >= 0; x--) {
-                                for (int z = 31; z >= 0; z--) {
-                                    if (!outFile.hasChunk(x, z)) {
-                                        break CHECK;
-                                    }
+                    CHECK:
+                    if (!forceoverwrite.get() && outFile != null) {
+                        for (int x = 31; x >= 0; x--) {
+                            for (int z = 31; z >= 0; z--) {
+                                if (!outFile.hasChunk(x, z)) {
+                                    break CHECK;
                                 }
                             }
-                            outFile.close();
-                            logger.trace("Skipping region (%d,%d) because it's already complete", pos.x, pos.z);
-                            return;
                         }
+                        outFile.close();
+                        logger.trace("Skipping region (%d,%d) because it's already complete", pos.x, pos.z);
+                        return;
                     }
                     Collection<World> potentialWorlds = entry.getValue();
-                    Collection<RegionFile> regionFiles1 = potentialWorlds.stream()
-                                                                         .map(world -> world.getRegionOrNull(pos))
-                                                                         .filter(Objects::nonNull)
-                                                                         .sorted(Comparator.comparingLong(RegionFile::lastModified))
-                                                                         .collect(Collectors.toCollection(ArrayDeque::new));
+                    Collection<RegionFile> regionFiles1 = inputorder.get() ?
+                            potentialWorlds.stream()
+                                           .map(world -> world.getRegionOrNull(pos))
+                                           .filter(Objects::nonNull)
+                                           .collect(Collectors.toCollection(ArrayDeque::new)) :
+                            potentialWorlds.stream()
+                                           .map(world -> world.getRegionOrNull(pos))
+                                           .filter(Objects::nonNull)
+                                           .sorted(Comparator.comparingLong(RegionFile::lastModified))
+                                           .collect(Collectors.toCollection(ArrayDeque::new));
                     RUN:
                     {
                         LOOP:
