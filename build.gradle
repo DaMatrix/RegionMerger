@@ -5,7 +5,7 @@ plugins {
 }
 
 group 'net.daporkchop'
-version '0.0.5'
+version '0.0.6'
 
 //mainClassName = "net.daporkchop.regionmerger.random.LocalRepoUpdate"
 //applicationDefaultJvmArgs = ["-Xmx4G", "-XX:+UseG1GC"]
@@ -25,9 +25,10 @@ dependencies {
     testCompile group: 'junit', name: 'junit', version: '4.12'
 
     compile 'com.google.code.gson:gson:2.8.5'
-    compile 'net.daporkchop.lib:binary:0.2.1-SNAPSHOT'
-    compile 'net.daporkchop.lib:primitive:0.2.1-SNAPSHOT'
-    compile 'net.daporkchop.lib:nbt:0.2.0'
+    compile 'net.daporkchop.lib:binary:0.3.0-SNAPSHOT'
+    compile 'net.daporkchop.lib:logging:0.3.0-SNAPSHOT'
+    compile 'net.daporkchop.lib:nbt:0.3.0-SNAPSHOT'
+    compile 'net.daporkchop.lib:primitive:0.3.0-SNAPSHOT'
     compile 'com.zaxxer:SparseBitSet:1.1'
     //compile 'org.brotli:dec:0.1.2'
     compile 'com.flowpowered:flow-nbt:1.0.1-SNAPSHOT'
@@ -36,16 +37,6 @@ dependencies {
     compile "de.schlichtherle.truezip:truezip-driver-tar:7.7.10"
 
     compile 'org.jfree:jfreechart:1.5.0'
-
-    //TODO: remove all these dependencies i added from coding on the wrong project
-    compile 'org.apache.maven.indexer:indexer-core:6.0.1-SNAPSHOT'
-    compile 'org.apache.maven.wagon:wagon-http:2.12'
-    compile 'org.eclipse.sisu:org.eclipse.sisu.plexus:0.3.3'
-    compile 'org.eclipse.aether:aether-impl:1.1.0'
-    compile 'org.eclipse.aether:aether-connector-basic:1.1.0'
-    compile 'org.eclipse.aether:aether-transport-file:1.1.0'
-    compile 'org.eclipse.aether:aether-transport-http:1.1.0'
-    compile 'org.apache.maven:maven-aether-provider:3.3.9'
 }
 
 jar {

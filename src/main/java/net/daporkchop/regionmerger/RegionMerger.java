@@ -3,8 +3,9 @@ package net.daporkchop.regionmerger;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import net.daporkchop.regionmerger.util.Pos;
+import net.daporkchop.lib.logging.Logging;
 import net.daporkchop.regionmerger.anvil.mojang.RegionFile;
+import net.daporkchop.regionmerger.util.Pos;
 import net.daporkchop.regionmerger.util.ThrowingBiConsumer;
 import net.daporkchop.regionmerger.util.ThrowingConsumer;
 
@@ -30,33 +31,37 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
-public class RegionMerger {
+public class RegionMerger implements Logging {
     public static final ThreadLocal<byte[]> BUFFER_CACHE = ThreadLocal.withInitial(() -> new byte[0xFFFFFF]);
 
     public static void main(String... args) throws IOException {
+        logger.enableANSI();
         if (args.length == 0 || (args.length == 1 && "--help".equals(args[0]))) {
-            System.out.println("PorkRegionMerger v0.0.5");
-            System.out.println();
-            System.out.println("--help                  Show this help message");
-            System.out.println("--input=<path>          Add an input directory, must be a path to the root of a Minecraft save");
-            System.out.println("--output=<path>         Set the output directory");
-            System.out.println("--mode=<mode>           Set the mode (defaults to merge)");
-            System.out.println("--areaCenterX=<x>       Set the center of the area along the X axis (only for area mode) (in chunks)");
-            System.out.println("--areaCenterZ=<z>       Set the center of the area along the Z axis (only for area mode) (in chunks)");
-            System.out.println("--areaRadius=<r>        Set the radius of the area (only for area mode) (in chunks)");
-            System.out.println("--findMinX=<minX>       Set the min X coord to check (only for findmissing mode) (in regions) (inclusive)");
-            System.out.println("--findMinZ=<minZ>       Set the min Z coord to check (only for findmissing mode) (in regions) (inclusive)");
-            System.out.println("--findMaxX=<minX>       Set the max X coord to check (only for findmissing mode) (in regions) (inclusive)");
-            System.out.println("--findMaxZ=<minZ>       Set the max Z coord to check (only for findmissing mode) (in regions) (inclusive)");
-            System.out.println("--suppressAreaWarnings  Hide warnings for chunks with no inputs (only for area mode)");
-            System.out.println("--skipincomplete        Skip incomplete regions (only for merge mode)");
-            System.out.println("--verbose   (-v)        Print more messages to your console (if you like spam ok)");
-            System.out.println("-j=<threads>            The number of worker threads (only for add mode, defaults to cpu count)");
-            System.out.println();
-            System.out.println("  Modes:  merge         Simply merges all chunks from all regions into the output");
-            System.out.println("          area          Merges all chunks in a specified area into the output");
-            System.out.println("          findmissing   Finds all chunks that aren't defined in an input and dumps them to a json file. Uses settings from area mode.");
-            System.out.println("          add           Add all the chunks from every input into the output world, without removing any");
+            logger.channel("Help")
+                  .info("PorkRegionMerger v0.0.5")
+                  .info()
+                  .info("--help                  Show this help message")
+                  .info("--input=<path>          Add an input directory, must be a path to the root of a Minecraft save")
+                  .info("--output=<path>         Set the output directory")
+                  .info("--mode=<mode>           Set the mode (defaults to merge)")
+                  .info("--areaCenterX=<x>       Set the center of the area along the X axis (only for area mode) (in chunks)")
+                  .info("--areaCenterZ=<z>       Set the center of the area along the Z axis (only for area mode) (in chunks)")
+                  .info("--areaRadius=<r>        Set the radius of the area (only for area mode) (in chunks)")
+                  .info("--findMinX=<minX>       Set the min X coord to check (only for findmissing mode) (in regions) (inclusive)")
+                  .info("--findMinZ=<minZ>       Set the min Z coord to check (only for findmissing mode) (in regions) (inclusive)")
+                  .info("--findMaxX=<minX>       Set the max X coord to check (only for findmissing mode) (in regions) (inclusive)")
+                  .info("--findMaxZ=<minZ>       Set the max Z coord to check (only for findmissing mode) (in regions) (inclusive)")
+                  .info("--suppressAreaWarnings  Hide warnings for chunks with no inputs (only for area mode)")
+                  .info("--skipincomplete        Skip incomplete regions (only for merge mode)")
+                  .info("--forceoverwrite        Forces the merger to overwrite all currently present chunks (only for add mode)")
+                  .info("--inputorder            Makes the merger prioritize inputs based on their order in the input command rather than by file system date")
+                  .info("--verbose   (-v)        Print more messages to your console (if you like spam ok)")
+                  .info("-j=<threads>            The number of worker threads (only for add mode, defaults to cpu count)")
+                  .info()
+                  .info("  Modes:  merge         Simply merges all chunks from all regions into the output")
+                  .info("          area          Merges all chunks in a specified area into the output")
+                  .info("          findmissing   Finds all chunks that aren't defined in an input and dumps them to a json file. Uses settings from area mode.")
+                  .info("          add           Add all the chunks from every input into the output world, without removing any");
             return;
         }
         Collection<File> inputDirs = new ArrayDeque<>();
@@ -73,18 +78,20 @@ public class RegionMerger {
         AtomicBoolean suppressAreaWarnings = new AtomicBoolean(false);
         AtomicBoolean verbose = new AtomicBoolean(false);
         AtomicBoolean skipincomplete = new AtomicBoolean(false);
+        AtomicBoolean forceoverwrite = new AtomicBoolean(false);
+        AtomicBoolean inputorder = new AtomicBoolean(false);
         for (String s : args) {
             if (s.startsWith("--input=")) {
                 File file = new File(s.split("=")[1]);
                 if (!file.exists()) {
-                    System.err.printf("Invalid input directory: %s\n", s.split("=")[1]);
+                    logger.error("Invalid input directory: %s", s.split("=")[1]);
                     return;
                 }
                 inputDirs.add(file);
             } else if (s.startsWith("--output=")) {
                 File file = new File(s.split("=")[1]);
                 if (!file.exists() && !file.mkdirs()) {
-                    System.err.printf("Invalid output directory: %s\n", s.split("=")[1]);
+                    logger.error("Invalid output directory: %s", s.split("=")[1]);
                     return;
                 }
                 outputDir = file;
@@ -98,7 +105,7 @@ public class RegionMerger {
                     case "removeoutlying":
                         break;
                     default: {
-                        System.err.printf("Unknown mode: %s\n", mode);
+                        logger.error("Unknown mode: %s", mode);
                         return;
                     }
                 }
@@ -107,7 +114,7 @@ public class RegionMerger {
                 try {
                     findMinX.set(Integer.parseInt(s));
                 } catch (NumberFormatException e) {
-                    System.err.printf("Invalid number: %s\n", s);
+                    logger.error("Invalid number: %s", s);
                     return;
                 }
             } else if (s.startsWith("--findMinZ=")) {
@@ -115,7 +122,7 @@ public class RegionMerger {
                 try {
                     findMinZ.set(Integer.parseInt(s));
                 } catch (NumberFormatException e) {
-                    System.err.printf("Invalid number: %s\n", s);
+                    logger.error("Invalid number: %s", s);
                     return;
                 }
             } else if (s.startsWith("--findMaxX=")) {
@@ -123,7 +130,7 @@ public class RegionMerger {
                 try {
                     findMaxX.set(Integer.parseInt(s));
                 } catch (NumberFormatException e) {
-                    System.err.printf("Invalid number: %s\n", s);
+                    logger.error("Invalid number: %s", s);
                     return;
                 }
             } else if (s.startsWith("--findMaxZ=")) {
@@ -131,7 +138,7 @@ public class RegionMerger {
                 try {
                     findMaxZ.set(Integer.parseInt(s));
                 } catch (NumberFormatException e) {
-                    System.err.printf("Invalid number: %s\n", s);
+                    logger.error("Invalid number: %s", s);
                     return;
                 }
             } else if (s.startsWith("--areaCenterX=")) {
@@ -139,7 +146,7 @@ public class RegionMerger {
                 try {
                     areaCenterX.set(Integer.parseInt(s));
                 } catch (NumberFormatException e) {
-                    System.err.printf("Invalid number: %s\n", s);
+                    logger.error("Invalid number: %s", s);
                     return;
                 }
             } else if (s.startsWith("--areaCenterZ=")) {
@@ -147,7 +154,7 @@ public class RegionMerger {
                 try {
                     areaCenterZ.set(Integer.parseInt(s));
                 } catch (NumberFormatException e) {
-                    System.err.printf("Invalid number: %s\n", s);
+                    logger.error("Invalid number: %s", s);
                     return;
                 }
             } else if (s.startsWith("--areaRadius=")) {
@@ -155,7 +162,7 @@ public class RegionMerger {
                 try {
                     areaRadius.set(Integer.parseInt(s));
                 } catch (NumberFormatException e) {
-                    System.err.printf("Invalid number: %s\n", s);
+                    logger.error("Invalid number: %s", s);
                     return;
                 }
             } else if (s.startsWith("-j=")) {
@@ -163,7 +170,7 @@ public class RegionMerger {
                 try {
                     threads.set(Integer.parseInt(s));
                 } catch (NumberFormatException e) {
-                    System.err.printf("Invalid number: %s\n", s);
+                    logger.error("Invalid number: %s", s);
                     return;
                 }
             } else if ("--suppressAreaWarnings".equals(s)) {
@@ -172,16 +179,20 @@ public class RegionMerger {
                 verbose.set(true);
             } else if ("--skipincomplete".equals(s)) {
                 skipincomplete.set(true);
+            } else if ("--forceoverwrite".equals(s)) {
+                forceoverwrite.set(true);
+            } else if ("--inputorder".equals(s)) {
+                inputorder.set(true);
             } else {
-                System.err.printf("Invalid argument: \"%s\"\n", s);
+                logger.error("Invalid argument: \"%s\"", s);
                 return;
             }
         }
         if (inputDirs.isEmpty()) {
-            System.err.println("No inputs specified!");
+            logger.error("No inputs specified!");
             return;
         } else if (outputDir == null && !("findmissing".equals(mode) || "removeoutlying".equals(mode))) {
-            System.err.println("No output specified!");
+            logger.error("No output specified!");
             return;
         }
         World outWorld = ("findmissing".equals(mode) || "removeoutlying".equals(mode)) ? null : new World(outputDir);
@@ -199,13 +210,13 @@ public class RegionMerger {
                 worlds.forEach(w -> w.ownedRegions.forEach(p -> {
                     poslookup.computeIfAbsent(p, x -> new ArrayDeque<>()).add(w);
                 }));
-                System.out.printf("Loaded %d worlds with a total of %d different regions\n", worlds.size(), poslookup.size());
+                logger.info("Loaded %d worlds with a total of %d different regions", worlds.size(), poslookup.size());
 
                 totalRegions.set(poslookup.size());
                 if (verbose.get()) {
                     new Thread(() -> {
                         while (running.get()) {
-                            System.out.printf("Current progess: copying region %d/%d\n", currentRegion.get(), totalRegions.get());
+                            logger.info("Current progess: copying region %d/%d", currentRegion.get(), totalRegions.get());
                             try {
                                 Thread.sleep(2000L);
                             } catch (InterruptedException e) {
@@ -256,9 +267,7 @@ public class RegionMerger {
                                     }
                                 });
                                 if (regionFilesChunk.isEmpty()) {
-                                    if (verbose.get()) {
-                                        System.out.printf("Warning: Chunk (%d,%d) in region (%d,%d) not found!\n", x, z, pos.x, pos.z);
-                                    }
+                                    logger.trace("Chunk (%d,%d) in region (%d,%d) not found!", x, z, pos.x, pos.z);
                                 } else {
                                     Iterator<RegionFile> iterator = regionFilesChunk.stream().sorted(Comparator.comparingLong(RegionFile::lastModified)).iterator();
                                     RegionFile r = iterator.next();
@@ -308,21 +317,21 @@ public class RegionMerger {
                         totalChunks.incrementAndGet();
                         Pos p = new Pos(x >> 5, z >> 5);
                         inputFileCache.computeIfAbsent(p, pos -> worlds.stream()
-                                .filter(w -> w.ownedRegions.contains(pos))
-                                .map(w -> w.getRegion(pos))
-                                .sorted(Comparator.comparingLong(RegionFile::lastModified))
-                                .collect(Collectors.toCollection(ArrayDeque::new)));
+                                                                       .filter(w -> w.ownedRegions.contains(pos))
+                                                                       .map(w -> w.getRegion(pos))
+                                                                       .sorted(Comparator.comparingLong(RegionFile::lastModified))
+                                                                       .collect(Collectors.toCollection(ArrayDeque::new)));
                         inputFileDependencies.computeIfAbsent(p, pos -> new AtomicInteger(0)).incrementAndGet();
                     }
                 }
                 long startTime = System.currentTimeMillis();
                 long totalSize = 0L;
-                System.out.printf("Copying %d chunks...\n", totalChunks.get());
+                logger.info("Copying %d chunks...", totalChunks.get());
 
                 if (verbose.get()) {
                     new Thread(() -> {
                         while (running.get()) {
-                            System.out.printf("Current progess: copying chunk %d/%d\n", currentChunk.get(), totalChunks.get());
+                            logger.info("Current progess: copying chunk %d/%d", currentChunk.get(), totalChunks.get());
                             try {
                                 Thread.sleep(2000L);
                             } catch (InterruptedException e) {
@@ -343,7 +352,7 @@ public class RegionMerger {
                             }
                         }
                         if (file == null || !file.hasChunk(chunkPos.x, chunkPos.z)) {
-                            System.out.printf("Chunk (%02d,%02d) in region (%04d,%04d) not found!\n", chunkPos.x, chunkPos.z, regionPos.x, regionPos.z);
+                            logger.warn("Chunk (%02d,%02d) in region (%04d,%04d) not found!", chunkPos.x, chunkPos.z, regionPos.x, regionPos.z);
                         } else {
                             RegionFile outputFile = outputFileCache.computeIfAbsent(regionPos, outWorld::getOrCreateRegion);
                             OutputStream os = outputFile.getChunkDataOutputStream(chunkPos.x, chunkPos.z);
@@ -361,14 +370,12 @@ public class RegionMerger {
                             os.close();
 
                             currentChunk.incrementAndGet();
-                            if (false && verbose.get()) {
-                                System.out.printf("Copied chunk (%02d,%02d) in region (%04d,%04d)    %d/%d\n", chunkPos.x, chunkPos.z, regionPos.x, regionPos.z, currentChunk.get(), totalChunks.get());
+                            if (false) {
+                                logger.trace("Copied chunk (%02d,%02d) in region (%04d,%04d)    %d/%d", chunkPos.x, chunkPos.z, regionPos.x, regionPos.z, currentChunk.get(), totalChunks.get());
                             }
                         }
                         if (inputFileDependencies.get(regionPos).decrementAndGet() <= 0) {
-                            if (verbose.get()) {
-                                System.out.printf("Removing all open files for region (%04d,%04d)\n", regionPos.x, regionPos.z);
-                            }
+                                logger.trace("Removing all open files for region (%04d,%04d)", regionPos.x, regionPos.z);
                             inputFileCache.remove(regionPos).forEach((ThrowingConsumer<RegionFile, IOException>) RegionFile::close);
                         }
                     }
@@ -376,17 +383,17 @@ public class RegionMerger {
 
                 running.set(false);
 
-                System.out.println("Closing files...");
+                logger.info("Closing files...");
                 outputFileCache.values().forEach((ThrowingConsumer<RegionFile, IOException>) RegionFile::close);
                 inputFileCache.values().forEach(c -> c.forEach((ThrowingConsumer<RegionFile, IOException>) RegionFile::close));
 
                 startTime = System.currentTimeMillis() - startTime;
-                System.out.printf("Copied %d chunks (%d bytes, %.2f MB) in %dh:%dm:%ds\n", totalChunks.get(), totalSize, (float) totalSize / (1024.0f * 1024.0f), startTime / (1000L * 60L * 60L), startTime / (1000L * 60L) % 60, startTime / 1000L % 60);
+                logger.success("Copied %d chunks (%d bytes, %.2f MB) in %dh:%dm:%ds", totalChunks.get(), totalSize, (float) totalSize / (1024.0f * 1024.0f), startTime / (1000L * 60L * 60L), startTime / (1000L * 60L) % 60, startTime / 1000L % 60);
             }
             break;
             case "findmissing": {
                 if (worlds.size() != 1) {
-                    System.err.printf("Mode 'findmissing' requires exactly one input, but found %d\n", worlds.size());
+                    logger.error("Mode 'findmissing' requires exactly one input, but found %d", worlds.size());
                     return;
                 }
                 World world = ((ArrayDeque<World>) worlds).element();
@@ -438,13 +445,13 @@ public class RegionMerger {
                 worlds.forEach(w -> w.ownedRegions.forEach(p -> {
                     poslookup.computeIfAbsent(p, x -> new ArrayDeque<>()).add(w);
                 }));
-                System.out.printf("Loaded %d worlds with a total of %d different regions\n", worlds.size(), poslookup.size());
+                logger.info("Loaded %d worlds with a total of %d different regions", worlds.size(), poslookup.size());
 
                 totalRegions.set(poslookup.size());
                 if (verbose.get()) {
                     new Thread(() -> {
                         while (running.get()) {
-                            System.out.printf("Current progess: copying region %d/%d\n", currentRegion.get(), totalRegions.get());
+                            logger.info("Current progess: copying region %d/%d", currentRegion.get(), totalRegions.get());
                             try {
                                 Thread.sleep(2000L);
                             } catch (InterruptedException e) {
@@ -468,18 +475,16 @@ public class RegionMerger {
                                 }
                             }
                             outFile.close();
-                            if (verbose.get()) {
-                                System.out.printf("Skipping region (%d,%d) because it's already complete\n", pos.x, pos.z);
-                            }
+                            logger.trace("Skipping region (%d,%d) because it's already complete", pos.x, pos.z);
                             return;
                         }
                     }
                     Collection<World> potentialWorlds = entry.getValue();
                     Collection<RegionFile> regionFiles1 = potentialWorlds.stream()
-                            .map(world -> world.getRegionOrNull(pos))
-                            .filter(Objects::nonNull)
-                            .sorted(Comparator.comparingLong(RegionFile::lastModified))
-                            .collect(Collectors.toCollection(ArrayDeque::new));
+                                                                         .map(world -> world.getRegionOrNull(pos))
+                                                                         .filter(Objects::nonNull)
+                                                                         .sorted(Comparator.comparingLong(RegionFile::lastModified))
+                                                                         .collect(Collectors.toCollection(ArrayDeque::new));
                     RUN:
                     {
                         LOOP:
@@ -543,8 +548,8 @@ public class RegionMerger {
                 });
                 running.set(false);
                 time = System.currentTimeMillis() - time;
-                System.out.printf(
-                        "Added %d regions (%.2f MB) in %dh:%dm:%ds at %.2fMB/s (%.2f regions/s)\n",
+                logger.success(
+                        "Added %d regions (%.2f MB) in %dh:%dm:%ds at %.2fMB/s (%.2f regions/s)",
                         totalRegions.get(),
                         (float) totalSize.get() / (1024.0f * 1024.0f),
                         time / (1000L * 60L * 60L),
@@ -555,9 +560,9 @@ public class RegionMerger {
                 );
             }
             break;
-            case "removeoutlying":  {
+            case "removeoutlying": {
                 if (worlds.size() != 1) {
-                    System.err.printf("Mode 'findmissing' requires exactly one input, but found %d\n", worlds.size());
+                    logger.error("Mode 'findmissing' requires exactly one input, but found %d", worlds.size());
                     return;
                 }
                 World world = ((ArrayDeque<World>) worlds).element();
@@ -576,7 +581,7 @@ public class RegionMerger {
                         String[] split = name.split("\\.");
                         int x = Integer.parseInt(split[1]);
                         int z = Integer.parseInt(split[2]);
-                        if (!positionsInRange.contains(new Pos(x, z)))  {
+                        if (!positionsInRange.contains(new Pos(x, z))) {
                             removedSize += f.length();
                             removed++;
                             f.deleteOnExit();
@@ -584,15 +589,15 @@ public class RegionMerger {
                     }
                 }
 
-                System.out.printf("Removed %d regions, totalling %.2f MB\n", removed, (float) removedSize / (1024.0f * 1024.0f));
+                logger.success("Removed %d regions, totalling %.2f MB", removed, (float) removedSize / (1024.0f * 1024.0f));
             }
             break;
             default: {
-                System.err.printf("Unknown mode: %s\n", mode);
+                logger.error("Unknown mode: %s", mode);
                 return;
             }
         }
 
-        System.out.println("Done!");
+        logger.success("Done!");
     }
 }
