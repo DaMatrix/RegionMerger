@@ -52,7 +52,7 @@ public class RegionMerger implements Logging {
         logger.enableANSI();
         if (args.length == 0 || (args.length == 1 && "--help".equals(args[0]))) {
             logger.channel("Help")
-                  .info("PorkRegionMerger v0.0.6")
+                  .info("PorkRegionMerger v0.0.7")
                   .info()
                   .info("--help                  Show this help message")
                   .info("--input=<path>          Add an input directory, must be a path to the root of a Minecraft save")
@@ -69,6 +69,7 @@ public class RegionMerger implements Logging {
                   .info("--skipincomplete        Skip incomplete regions (only for merge mode)")
                   .info("--forceoverwrite        Forces the merger to overwrite all currently present chunks (only for add mode)")
                   .info("--inputorder            Prioritize inputs by their input order rather than by file age (only for add mode)")
+                  .info("--skipcopy              Slower, can fix some issues (only for merge mode)")
                   .info("--verbose   (-v)        Print more messages to your console (if you like spam ok)")
                   .info("-j=<threads>            The number of worker threads (only for add mode, defaults to cpu count)")
                   .info()
@@ -94,6 +95,7 @@ public class RegionMerger implements Logging {
         AtomicBoolean skipincomplete = new AtomicBoolean(false);
         AtomicBoolean forceoverwrite = new AtomicBoolean(false);
         AtomicBoolean inputorder = new AtomicBoolean(false);
+        AtomicBoolean skipcopy = new AtomicBoolean(false);
         for (String s : args) {
             if (s.startsWith("--input=")) {
                 File file = new File(s.split("=")[1]);
@@ -197,6 +199,8 @@ public class RegionMerger implements Logging {
                 forceoverwrite.set(true);
             } else if ("--inputorder".equals(s)) {
                 inputorder.set(true);
+            } else if ("--skipcopy".equals(s)) {
+                skipcopy.set(true);
             } else {
                 logger.error("Invalid argument: \"%s\"", s);
                 return;
@@ -245,27 +249,29 @@ public class RegionMerger implements Logging {
                     RegionFile out = outWorld.getRegion(pos, false);
                     RUN:
                     {
-                        FILELOOP:
-                        for (RegionFile file : regionFiles) {
-                            for (int x = 31; x >= 0; x--) {
-                                for (int z = 31; z >= 0; z--) {
-                                    if (!file.hasChunk(x, z)) {
-                                        continue FILELOOP;
+                        if (!skipcopy.get()) {
+                            FILELOOP:
+                            for (RegionFile file : regionFiles) {
+                                for (int x = 31; x >= 0; x--) {
+                                    for (int z = 31; z >= 0; z--) {
+                                        if (!file.hasChunk(x, z)) {
+                                            continue FILELOOP;
+                                        }
                                     }
                                 }
+                                //if we've gotten here, the region has all chunks and we can copy it directly
+                                out.close();
+                                OutputStream os = new FileOutputStream(out.fileName);
+                                InputStream is = new FileInputStream(file.fileName);
+                                byte[] buffer = BUFFER_CACHE.get();
+                                int len;
+                                while ((len = is.read(buffer)) != -1) {
+                                    os.write(buffer, 0, len);
+                                }
+                                is.close();
+                                os.close();
+                                break RUN;
                             }
-                            //if we've gotten here, the region has all chunks and we can copy it directly
-                            out.close();
-                            OutputStream os = new FileOutputStream(out.fileName);
-                            InputStream is = new FileInputStream(file.fileName);
-                            byte[] buffer = BUFFER_CACHE.get();
-                            int len;
-                            while ((len = is.read(buffer)) != -1) {
-                                os.write(buffer, 0, len);
-                            }
-                            is.close();
-                            os.close();
-                            break RUN;
                         }
                         if (skipincomplete.get()) {
                             break RUN;
