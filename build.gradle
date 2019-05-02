@@ -5,7 +5,7 @@ plugins {
 }
 
 group 'net.daporkchop'
-version '0.0.7'
+version '0.0.8'
 
 /*
  * Adapted from the Wizardry License

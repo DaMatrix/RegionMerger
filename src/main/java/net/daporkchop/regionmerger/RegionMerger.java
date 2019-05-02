@@ -52,7 +52,7 @@ public class RegionMerger implements Logging {
         logger.enableANSI();
         if (args.length == 0 || (args.length == 1 && "--help".equals(args[0]))) {
             logger.channel("Help")
-                  .info("PorkRegionMerger v0.0.7")
+                  .info("PorkRegionMerger v0.0.8")
                   .info()
                   .info("--help                  Show this help message")
                   .info("--input=<path>          Add an input directory, must be a path to the root of a Minecraft save")
@@ -289,7 +289,12 @@ public class RegionMerger implements Logging {
                                 if (regionFilesChunk.isEmpty()) {
                                     logger.trace("Chunk (%d,%d) in region (%d,%d) not found!", x, z, pos.x, pos.z);
                                 } else {
-                                    Iterator<RegionFile> iterator = regionFilesChunk.stream().sorted(Comparator.comparingLong(RegionFile::lastModified)).iterator();
+                                    if (regionFilesChunk.size() != 1)   {
+                                        int i = 0;
+                                    }
+                                    Iterator<RegionFile> iterator = inputorder.get() ?
+                                            regionFilesChunk.iterator() :
+                                            regionFilesChunk.stream().sorted(Comparator.comparingLong(RegionFile::lastModified).reversed()).iterator();
                                     RegionFile r = iterator.next();
                                     OutputStream os = out.getChunkDataOutputStream(x, z);
                                     InputStream is = r.getChunkDataInputStream(x, z);
@@ -339,7 +344,7 @@ public class RegionMerger implements Logging {
                         inputFileCache.computeIfAbsent(p, pos -> worlds.stream()
                                                                        .filter(w -> w.ownedRegions.contains(pos))
                                                                        .map(w -> w.getRegion(pos))
-                                                                       .sorted(Comparator.comparingLong(RegionFile::lastModified))
+                                                                       .sorted(Comparator.comparingLong(RegionFile::lastModified).reversed())
                                                                        .collect(Collectors.toCollection(ArrayDeque::new)));
                         inputFileDependencies.computeIfAbsent(p, pos -> new AtomicInteger(0)).incrementAndGet();
                     }
@@ -506,7 +511,7 @@ public class RegionMerger implements Logging {
                             potentialWorlds.stream()
                                            .map(world -> world.getRegionOrNull(pos))
                                            .filter(Objects::nonNull)
-                                           .sorted(Comparator.comparingLong(RegionFile::lastModified))
+                                           .sorted(Comparator.comparingLong(RegionFile::lastModified).reversed())
                                            .collect(Collectors.toCollection(ArrayDeque::new));
                     RUN:
                     {
