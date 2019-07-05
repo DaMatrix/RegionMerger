@@ -43,7 +43,7 @@ public class World {
                     throw new IllegalStateException(String.format("Could not create folder: %s", this.regions.getAbsolutePath()));
                 }
             } else {
-                throw new IllegalStateException("No region folder!");
+                throw new IllegalStateException("No region folder in " + this.regions.getAbsolutePath());
             }
         }
         File[] files = this.regions.listFiles();
