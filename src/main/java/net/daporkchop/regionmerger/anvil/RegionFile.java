@@ -10,9 +10,10 @@
  * Any persons and/or organizations using this software must disclose their source code and have it publicly available, include this license, provide sufficient credit to the original authors of the project (IE: DaPorkchop_), as well as provide a link to the original project.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON INFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
  */
 
-package net.daporkchop.regionmerger.anvil.mojang;
+package net.daporkchop.regionmerger.anvil;
 
 /*
  * 2011 February 16
@@ -61,9 +62,9 @@ package net.daporkchop.regionmerger.anvil.mojang;
 
  */
 
-import net.daporkchop.lib.encoding.compression.EnumCompression;
-import net.daporkchop.lib.primitive.map.IntegerObjectMap;
-import net.daporkchop.lib.primitive.map.hashmap.IntegerObjectHashMap;
+import com.zaxxer.sparsebits.SparseBitSet;
+import net.daporkchop.lib.primitive.map.IntObjMap;
+import net.daporkchop.lib.primitive.map.hash.open.IntObjOpenHashMap;
 import net.daporkchop.regionmerger.util.IOEFunction;
 
 import java.io.*;
@@ -76,10 +77,9 @@ public class RegionFile implements AutoCloseable {
 
     private static final int PORKIAN_VERSION_MASK = 0x80;
     private static final int VERSION_RAW = PORKIAN_VERSION_MASK | 1;
-    private static final int VERSION_XZIP = PORKIAN_VERSION_MASK | 2;
 
-    private static final IntegerObjectMap<IOEFunction<InputStream, InputStream>> inflaterCreatorMap = new IntegerObjectHashMap<>();
-    private static final IntegerObjectMap<IOEFunction<OutputStream, OutputStream>> deflaterCreatorMap = new IntegerObjectHashMap<>();
+    private static final IntObjMap<IOEFunction<InputStream, InputStream>>          inflaterCreatorMap = new IntObjOpenHashMap<>();
+    private static final IntObjMap<IOEFunction<OutputStream, OutputStream>> deflaterCreatorMap = new IntObjOpenHashMap<>();
 
     static {
         inflaterCreatorMap.put(VERSION_GZIP, GZIPInputStream::new);
@@ -170,6 +170,14 @@ public class RegionFile implements AutoCloseable {
                 int lastModValue = file.readInt();
                 chunkTimestamps[i] = lastModValue;
             }
+
+            SparseBitSet bitSet = new SparseBitSet();
+            for (int i = 0; i < this.sectorFree.size(); i++)    {
+                if (!this.sectorFree.get(i)) {
+                    bitSet.set(i);
+                }
+            }
+            System.out.println(bitSet);
         } catch (IOException e) {
             e.printStackTrace();
         }
