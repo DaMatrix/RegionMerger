@@ -1,11 +1,10 @@
 plugins {
-    id 'java'
-    id 'io.franzbecker.gradle-lombok' version '1.14'
-    //id 'application'
+    id "java"
+    id "io.franzbecker.gradle-lombok" version "1.14"
 }
 
-group 'net.daporkchop'
-version '0.0.8'
+group "net.daporkchop"
+version "0.1.0-SNAPSHOT"
 
 /*
  * Adapted from the Wizardry License
@@ -19,38 +18,35 @@ version '0.0.8'
  * Any persons and/or organizations using this software must disclose their source code and have it publicly available, include this license, provide sufficient credit to the original authors of the project (IE: DaPorkchop_), as well as provide a link to the original project.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON INFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
  */
-
-//mainClassName = "net.daporkchop.regionmerger.random.LocalRepoUpdate"
-//applicationDefaultJvmArgs = ["-Xmx4G", "-XX:+UseG1GC"]
 
 sourceCompatibility = 1.8
 
 repositories {
     mavenLocal()
     maven {
-        name = 'DaPorkchop_'
-        url = 'https://maven.daporkchop.net/'
+        name = "DaPorkchop_"
+        url = "https://maven.daporkchop.net/"
     }
     mavenCentral()
 }
 
+ext {
+    gsonVersion = "2.8.5"
+    junitVersion = "4.12"
+    porklibVersion = "0.4.0-SNAPSHOT"
+}
+
 dependencies {
-    testCompile group: 'junit', name: 'junit', version: '4.12'
+    compile "net.daporkchop.lib:binary:$porklibVersion"
+    compile "net.daporkchop.lib:logging:$porklibVersion"
+    compile "net.daporkchop.lib:nbt:$porklibVersion"
+    compile "net.daporkchop.lib:primitive:$porklibVersion"
 
-    compile 'com.google.code.gson:gson:2.8.5'
-    compile 'net.daporkchop.lib:binary:0.3.0-SNAPSHOT'
-    compile 'net.daporkchop.lib:logging:0.3.0-SNAPSHOT'
-    compile 'net.daporkchop.lib:nbt:0.3.0-SNAPSHOT'
-    compile 'net.daporkchop.lib:primitive:0.3.0-SNAPSHOT'
-    compile 'com.zaxxer:SparseBitSet:1.1'
-    //compile 'org.brotli:dec:0.1.2'
-    compile 'com.flowpowered:flow-nbt:1.0.1-SNAPSHOT'
+    compile "com.google.code.gson:gson:$gsonVersion"
 
-    compile "de.schlichtherle.truezip:truezip-file:7.7.10"
-    compile "de.schlichtherle.truezip:truezip-driver-tar:7.7.10"
-
-    compile 'org.jfree:jfreechart:1.5.0'
+    testCompile "junit:junit:$junitVersion"
 }
 
 jar {
@@ -65,10 +61,8 @@ jar {
     }
 
     manifest {
-        attributes 'Implementation-Title': 'DaPorkchop_ok',
-                'Implementation-Version': version,
-                'Main-Class': 'net.daporkchop.regionmerger.RegionMerger'
-                //'Main-Class': 'net.daporkchop.regionmerger.random.LocalRepoUpdate'
-                //'Main-Class': 'net.daporkchop.regionmerger.anvil.pork.tar.ToTARConverter'
+        attributes "Implementation-Title": "DaPorkchop_ok",
+                "Implementation-Version": version,
+                "Main-Class": "net.daporkchop.regionmerger.RegionMerger"
     }
 }
