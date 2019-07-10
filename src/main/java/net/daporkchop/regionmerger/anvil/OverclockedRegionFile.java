@@ -18,11 +18,15 @@ package net.daporkchop.regionmerger.anvil;
 import com.zaxxer.sparsebits.SparseBitSet;
 import lombok.Getter;
 import lombok.NonNull;
+import net.daporkchop.lib.binary.stream.DataIn;
+import net.daporkchop.lib.binary.stream.DataOut;
 import net.daporkchop.lib.common.misc.file.PFiles;
 import net.daporkchop.lib.encoding.compression.Compression;
 import net.daporkchop.lib.encoding.compression.CompressionHelper;
 import net.daporkchop.lib.primitive.map.ByteObjMap;
+import net.daporkchop.lib.primitive.map.ObjByteMap;
 import net.daporkchop.lib.primitive.map.hash.open.ByteObjOpenHashMap;
+import net.daporkchop.lib.primitive.map.hash.open.ObjByteOpenHashMap;
 
 import java.io.File;
 import java.io.IOException;
@@ -33,57 +37,70 @@ import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.zip.DeflaterOutputStream;
 import java.util.zip.GZIPInputStream;
-import java.util.zip.GZIPOutputStream;
+import java.util.zip.Inflater;
 import java.util.zip.InflaterInputStream;
 
 /**
  * A highly optimized rewrite of Mojang's original {@link RegionFile}, designed with backwards-compatibility in mind.
  * <p>
- * Of course, compression modes other than 1 and 2 (GZip and ZLIB respectively) won't work with a vanilla Minecraft implementation, so
+ * Of course, compression modes other than 1 and 2 (GZip and DEFLATE respectively) won't work with a vanilla Minecraft implementation, so
  * they should be avoided.
  *
  * @author DaPorkchop_
  */
 public class OverclockedRegionFile implements AutoCloseable {
-    protected static final ByteObjMap<CompressionHelper> COMPRESSION_IDS   = new ByteObjOpenHashMap<>();
-    protected static final int                           CHUNK_HEADER_SIZE = 5;
-    protected static final int                           SECTOR_BYTES      = 4096;
-    protected static final int                           SECTOR_INTS       = SECTOR_BYTES >> 2;
-    protected static final byte                          EMPTY_SECTOR[]    = new byte[SECTOR_BYTES];
+    protected static final int CHUNK_HEADER_SIZE = 5;
+    protected static final int SECTOR_BYTES      = 4096;
+    protected static final int SECTOR_INTS       = SECTOR_BYTES >> 2;
+
+    public static final byte ID_NONE    = 0;
+    public static final byte ID_GZIP    = 1; //official, no longer used by vanilla
+    public static final byte ID_DEFLATE = 2; //official
+    public static final byte ID_BZIP2   = 3;
+    public static final byte ID_LZ4     = 4;
+    public static final byte ID_LZMA    = 5;
+    public static final byte ID_XZ      = 6;
+
+    protected static final ByteObjMap<CompressionHelper> COMPRESSION_IDS         = new ByteObjOpenHashMap<>();
+    protected static final ObjByteMap<CompressionHelper> REVERSE_COMPRESSION_IDS = new ObjByteOpenHashMap<>();
+    protected static final byte[]                        EMPTY_SECTOR            = new byte[SECTOR_BYTES];
+    protected static final ThreadLocal<ByteBuffer>       BUFFER_CACHE            = ThreadLocal.withInitial(() -> ByteBuffer.allocateDirect(1 << 20)); //1 MB
 
     static {
-        //Compatibility with legacy RegionFile
-        COMPRESSION_IDS.put((byte) 1, CompressionHelper.builder("GZip", "RegionFile legacy compat")
-                                                       .setInputStreamWrapperSimple(GZIPInputStream::new)
-                                                       .setOutputStreamWrapperSimple(GZIPOutputStream::new)
-                                                       .build());
-        COMPRESSION_IDS.put((byte) 2, CompressionHelper.builder("ZLIB", "RegionFile legacy compat")
-                                                       .setInputStreamWrapperSimple(InflaterInputStream::new)
-                                                       .setOutputStreamWrapperSimple(DeflaterOutputStream::new)
-                                                       .build());
-        //COMPRESSION_IDS.put((byte) 2, Compression.DEFLATE_HIGH);
+        //id => compression algo
+        COMPRESSION_IDS.put(ID_NONE, Compression.NONE);
+        COMPRESSION_IDS.put(ID_GZIP, Compression.GZIP_NORMAL);
+        COMPRESSION_IDS.put(ID_DEFLATE, Compression.DEFLATE_NORMAL);
+        COMPRESSION_IDS.put(ID_BZIP2, Compression.BZIP2_NORMAL);
+        COMPRESSION_IDS.put(ID_LZ4, Compression.LZ4_BLOCK);
+        COMPRESSION_IDS.put(ID_LZMA, Compression.LZMA_NORMAL);
+        COMPRESSION_IDS.put(ID_XZ, Compression.XZ_NORMAL);
 
-        //new things
-        COMPRESSION_IDS.put((byte) 0, Compression.NONE);
-        COMPRESSION_IDS.put((byte) 3, Compression.GZIP_LOW);
-        COMPRESSION_IDS.put((byte) 4, Compression.GZIP_NORMAL);
-        COMPRESSION_IDS.put((byte) 5, Compression.GZIP_HIGH);
-        COMPRESSION_IDS.put((byte) 6, Compression.BZIP2_LOW);
-        COMPRESSION_IDS.put((byte) 7, Compression.BZIP2_NORMAL);
-        COMPRESSION_IDS.put((byte) 8, Compression.BZIP2_HIGH);
-        COMPRESSION_IDS.put((byte) 9, Compression.DEFLATE_LOW);
-        COMPRESSION_IDS.put((byte) 10, Compression.DEFLATE_NORMAL);
-        COMPRESSION_IDS.put((byte) 11, Compression.DEFLATE_HIGH);
-        COMPRESSION_IDS.put((byte) 12, Compression.LZ4_BLOCK);
-        COMPRESSION_IDS.put((byte) 13, Compression.LZMA_LOW);
-        COMPRESSION_IDS.put((byte) 14, Compression.LZMA_NORMAL);
-        COMPRESSION_IDS.put((byte) 15, Compression.LZMA_HIGH);
+        //compression algo => id
+        REVERSE_COMPRESSION_IDS.put(Compression.NONE, ID_NONE);
+        REVERSE_COMPRESSION_IDS.put(Compression.GZIP_LOW, ID_GZIP);
+        REVERSE_COMPRESSION_IDS.put(Compression.GZIP_NORMAL, ID_GZIP);
+        REVERSE_COMPRESSION_IDS.put(Compression.GZIP_HIGH, ID_GZIP);
+        REVERSE_COMPRESSION_IDS.put(Compression.DEFLATE_LOW, ID_DEFLATE);
+        REVERSE_COMPRESSION_IDS.put(Compression.DEFLATE_NORMAL, ID_DEFLATE);
+        REVERSE_COMPRESSION_IDS.put(Compression.DEFLATE_HIGH, ID_DEFLATE);
+        REVERSE_COMPRESSION_IDS.put(Compression.BZIP2_LOW, ID_BZIP2);
+        REVERSE_COMPRESSION_IDS.put(Compression.BZIP2_NORMAL, ID_BZIP2);
+        REVERSE_COMPRESSION_IDS.put(Compression.BZIP2_HIGH, ID_BZIP2);
+        REVERSE_COMPRESSION_IDS.put(Compression.LZ4_BLOCK, ID_LZ4);
+        REVERSE_COMPRESSION_IDS.put(Compression.LZ4_FRAMED_64KB, ID_LZ4);
+        REVERSE_COMPRESSION_IDS.put(Compression.LZ4_FRAMED_256KB, ID_LZ4);
+        REVERSE_COMPRESSION_IDS.put(Compression.LZ4_FRAMED_1MB, ID_LZ4);
+        REVERSE_COMPRESSION_IDS.put(Compression.LZ4_FRAMED_4MB, ID_LZ4);
+        REVERSE_COMPRESSION_IDS.put(Compression.LZMA_LOW, ID_LZMA);
+        REVERSE_COMPRESSION_IDS.put(Compression.LZMA_NORMAL, ID_LZMA);
+        REVERSE_COMPRESSION_IDS.put(Compression.LZMA_HIGH, ID_LZMA);
+        REVERSE_COMPRESSION_IDS.put(Compression.XZ_LOW, ID_XZ);
+        REVERSE_COMPRESSION_IDS.put(Compression.XZ_NORMAL, ID_XZ);
+        REVERSE_COMPRESSION_IDS.put(Compression.XZ_HIGH, ID_XZ);
     }
 
     private static void ensureInBounds(int x, int z) {
@@ -148,45 +165,186 @@ public class OverclockedRegionFile implements AutoCloseable {
         System.out.println(this.occupiedSectors);
     }
 
-    public InputStream readData(int x, int z) throws IOException {
-        ensureInBounds(x, z);
-        int offset = this.getOffset(x, z);
-        if (offset == 0) {
+    /**
+     * Gets an {@link InputStream} that can inflate and read the contents of the chunk at the given coordinates (relative to this region).
+     *
+     * @param x the chunk's X coordinate
+     * @param z the chunk's Z coordinate
+     * @return an {@link InputStream} that can inflate and read the contents of the chunk at the given coordinates, or {@code null} if the chunk is not present
+     * @throws IOException if an IO exception occurs you dummy
+     */
+    public InputStream read(int x, int z) throws IOException {
+        ByteBuffer buffer = this.readDirect(x, z);
+        if (buffer == null) {
             return null;
         }
-
-        return null;
-    }
-
-    public OutputStream write(int x, int z, @NonNull CompressionHelper compression) throws IOException {
-        AtomicInteger i = new AtomicInteger(-1);
-        COMPRESSION_IDS.forEach((id, helper) -> {
-            if (helper == compression) {
-                i.set(id & 0xFF);
-            }
-        });
-        if (i.get() == -1) {
-            throw new IllegalArgumentException(String.format("Unregistered compression format: %s", compression));
+        byte compressionId = buffer.get();
+        if (compressionId == ID_NONE) {
+            return DataIn.wrap(buffer);
         } else {
-            return this.write(x, z, i.get());
+            //return COMPRESSION_IDS.get(compressionId).inflate(DataIn.wrap(buffer));
+            return new InflaterInputStream(DataIn.wrap(buffer));
         }
     }
 
-    public OutputStream write(int x, int z, int compressionId) throws IOException {
+    /**
+     * Reads the raw contents of the chunk at the given coordinates into a buffer.
+     * <p>
+     * Note that the buffer returned by this method should not be kept around! If you need to read multiple chunks at the same time, it is advised to use
+     * your own buffer and {@link #readDirect(int, int, ByteBuffer)}.
+     *
+     * @param x the chunk's X coordinate
+     * @param z the chunk's Z coordinate
+     * @return a buffer containing the raw contents of the chunk, or {@code null} if the chunk is not present
+     * @throws IOException if an IO exception occurs you dummy
+     */
+    public ByteBuffer readDirect(int x, int z) throws IOException {
+        ByteBuffer buffer = (ByteBuffer) BUFFER_CACHE.get().clear();
+        return this.readDirect(x, z, buffer) ? buffer : null;
+    }
+
+    /**
+     * Reads the raw contents of the chunk at the given coordinates into the given buffer.
+     *
+     * @param x      the chunk's X coordinate
+     * @param z      the chunk's Z coordinate
+     * @param buffer the buffer to read the chunk contents into
+     * @return {@code true} if the chunk exists and could successfully be read into the buffer, {@code false} otherwise
+     * @throws IOException if an IO exception occurs you dummy
+     */
+    public boolean readDirect(int x, int z, @NonNull ByteBuffer buffer) throws IOException {
         ensureInBounds(x, z);
 
-        CompressionHelper compression = COMPRESSION_IDS.get((byte) compressionId);
-        if (compression == null) {
-            throw new IllegalArgumentException(String.format("Invalid compression id: %d", compressionId));
-        }
+        this.lock.readLock().lock();
+        try {
+            int offset = this.getOffset(x, z);
+            if (offset == 0) {
+                return false;
+            }
 
-        return null;
+            buffer.limit((offset & 0xFF) * SECTOR_BYTES);
+            this.channel.read(buffer, (offset >> 8) * SECTOR_BYTES);
+            if (buffer.hasRemaining()) {
+                throw new IOException(String.format("Couldn't read whole chunk! %d bytes remaining.", buffer.remaining()));
+            }
+            buffer.rewind().limit(buffer.getInt() + 4);
+            return true;
+        } finally {
+            this.lock.readLock().unlock();
+        }
     }
 
-    private void theActualRealDoWrite(long pos, @NonNull List<ByteBuffer> buffers) throws IOException {
-        for (ByteBuffer buffer : buffers) {
-            this.channel.write(buffer, pos);
-            pos += SECTOR_BYTES;
+    /**
+     * Gets a {@link DataOut} that will compress data written to it using the given compression type. The compressed data will be written to disk at the specified
+     * region-local chunk coordinates when the {@link DataOut} instance is closed (using {@link DataOut#close()}.
+     *
+     * @param x           the chunk's X coordinate
+     * @param z           the chunk's Z coordinate
+     * @param compression the type of compression to use
+     * @return a {@link DataOut} for writing data to the given chunk
+     * @throws IOException if an IO exception occurs you dummy
+     */
+    public DataOut write(int x, int z, @NonNull CompressionHelper compression) throws IOException {
+        byte compressionId = REVERSE_COMPRESSION_IDS.get(compression);
+        if (compressionId == -1) {
+            throw new IllegalArgumentException(String.format("Unregistered compression format: %s", compression));
+        } else {
+            return this.write(x, z, compression, compressionId);
+        }
+    }
+
+    /**
+     * Gets a {@link DataOut} that will compress data written to it using the given compression type. The compressed data will be written to disk at the specified
+     * region-local chunk coordinates when the {@link DataOut} instance is closed (using {@link DataOut#close()}.
+     *
+     * @param x             the chunk's X coordinate
+     * @param z             the chunk's Z coordinate
+     * @param compression   the type of compression to use
+     * @param compressionId the compression's ID, for writing to disk for decompression
+     * @return a {@link DataOut} for writing data to the given chunk
+     * @throws IOException if an IO exception occurs you dummy
+     */
+    public DataOut write(int x, int z, @NonNull CompressionHelper compression, byte compressionId) throws IOException {
+        ensureInBounds(x, z);
+
+        return new DataOut() {
+            private final ByteBuffer buf = ((ByteBuffer) BUFFER_CACHE.get().clear().position(4)).put((byte) compressionId);
+            private final OutputStream delegate = compression.deflate(DataOut.wrap(buf));
+
+            @Override
+            public void write(int b) throws IOException {
+                this.delegate.write(b);
+            }
+
+            @Override
+            public void write(byte[] b, int off, int len) throws IOException {
+                this.delegate.write(b, off, len);
+            }
+
+            @Override
+            public void close() throws IOException {
+                this.delegate.close();
+
+                OverclockedRegionFile.this.doWrite(x, z, buf);
+            }
+        };
+    }
+
+    /**
+     * Writes raw chunk data to the region at the given region-local coordinates.
+     * @param x             the chunk's X coordinate
+     * @param z             the chunk's Z coordinate
+     * @param b a {@code byte[]} containing the raw chunk data.
+     * @throws IOException if an IO exception occurs you dummy
+     */
+    public void writeDirect(int x, int z, @NonNull byte[] b) throws IOException {
+        this.writeDirect(x, z, ByteBuffer.wrap(b));
+    }
+
+    public void writeDirect(int x, int z, @NonNull ByteBuffer b) throws IOException {
+        ensureInBounds(x, z);
+
+        this.doWrite(x, z, ((ByteBuffer) BUFFER_CACHE.get().clear()).putInt(b.remaining()).put(b));
+    }
+
+    private void doWrite(int x, int z, @NonNull ByteBuffer buf) throws IOException {
+        this.lock.writeLock().lock();
+        try {
+            buf.flip().mark();
+            int remaining = buf.remaining();
+            buf.putInt(remaining - 4).reset();
+
+            int requiredSectors = (remaining + CHUNK_HEADER_SIZE) / SECTOR_BYTES + 1;
+            int offset = this.getOffset(x, z);
+            if (offset != 0) {
+                if ((offset & 0xFF) == requiredSectors) {
+                    //re-use old sectors
+                    this.channel.write(buf, (offset >> 8) * SECTOR_BYTES);
+                    return;
+                } else {
+                    //clear old sectors to search for new ones
+                    //this makes it faster and less prone to bugs than shrinking existing allocations
+                    this.occupiedSectors.clear(offset >> 8, (offset >> 8) + (offset & 0xFF));
+                }
+            }
+            offset = 0;
+            int i = this.occupiedSectors.nextClearBit(0);
+            SEARCH:
+            while (offset == 0) {
+                int j = 0;
+                while (j < requiredSectors) {
+                    if (this.occupiedSectors.get(i + j++)) {
+                        i = this.occupiedSectors.nextClearBit(i + j);
+                        continue SEARCH;
+                    }
+                }
+                //if we get this far, we've found a sufficiently long clear stretch
+                offset = requiredSectors | (i << 8);
+            }
+            this.channel.write(buf, (offset >> 8) * SECTOR_BYTES);
+            this.setOffset(x, z, offset);
+        } finally {
+            this.lock.writeLock().unlock();
         }
     }
 
@@ -200,10 +358,6 @@ public class OverclockedRegionFile implements AutoCloseable {
 
     private void setOffset(int x, int z, int offset) {
         this.index.putInt((x + z * 32) * 4, offset);
-    }
-
-    private void setTimestamp(int x, int z, int value) {
-        this.index.putInt(SECTOR_BYTES + (x + z * 32) * 4, value);
     }
 
     @Override

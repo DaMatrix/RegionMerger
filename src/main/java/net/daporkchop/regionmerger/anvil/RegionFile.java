@@ -63,6 +63,7 @@ package net.daporkchop.regionmerger.anvil;
  */
 
 import com.zaxxer.sparsebits.SparseBitSet;
+import net.daporkchop.lib.encoding.compression.Compression;
 import net.daporkchop.lib.primitive.map.IntObjMap;
 import net.daporkchop.lib.primitive.map.hash.open.IntObjOpenHashMap;
 import net.daporkchop.regionmerger.util.IOEFunction;
@@ -268,19 +269,11 @@ public class RegionFile implements AutoCloseable {
     }
 
     public DataOutputStream getChunkDataOutputStream(int x, int z) {
-        return this.getChunkDataOutputStream(x, z, VERSION_DEFLATE);
-    }
-
-    public DataOutputStream getChunkDataOutputStream(int x, int z, int version) {
-        if (outOfBounds(x, z)) return null;
-        IOEFunction<OutputStream, OutputStream> streamCreator = deflaterCreatorMap.get(version);
-        if (streamCreator == null)  {
-            throw new IllegalArgumentException(String.format("Unknown compression version: %d", version));
+        try {
+            return new DataOutputStream(Compression.DEFLATE_HIGH.deflate(new ChunkBuffer(x, z, VERSION_DEFLATE)));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
-
-        OutputStream os = new ChunkBuffer(x, z, version);
-        os = streamCreator.apply(os);
-        return new DataOutputStream(os);
     }
 
     /*
