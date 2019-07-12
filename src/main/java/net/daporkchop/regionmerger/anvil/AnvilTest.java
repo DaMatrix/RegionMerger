@@ -32,7 +32,7 @@ public class AnvilTest {
         File file = new File("/media/daporkchop/TooMuchStuff/Misc/2b2t_org/region/r.-1.-1.mca");
         byte[] b = new byte[1024];
 
-        /*System.out.println("Re-compressing using Mojang's RegionFile");
+        System.out.println("Re-compressing using Mojang's RegionFile");
         try (RegionFile src = new RegionFile(file);
              RegionFile dst = new RegionFile(new File("./mojang.mca"))) {
             for (int x = 31; x >= 0; x--)   {
@@ -43,9 +43,11 @@ public class AnvilTest {
                             out.write(b, 0, i);
                         }
                     }
+                    break;
                 }
+                break;
             }
-        }*/
+        }
 
         System.out.println("Re-compressing using OverclockedRegionFile");
         try (OverclockedRegionFile src = new OverclockedRegionFile(file);
@@ -58,7 +60,9 @@ public class AnvilTest {
                             out.write(b, 0, i);
                         }
                     }
+                    break;
                 }
+                break;
             }
         }
 

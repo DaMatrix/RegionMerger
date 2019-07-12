@@ -63,6 +63,7 @@ package net.daporkchop.regionmerger.anvil;
  */
 
 import com.zaxxer.sparsebits.SparseBitSet;
+import net.daporkchop.lib.encoding.Hexadecimal;
 import net.daporkchop.lib.encoding.compression.Compression;
 import net.daporkchop.lib.primitive.map.IntObjMap;
 import net.daporkchop.lib.primitive.map.hash.open.IntObjOpenHashMap;
@@ -237,6 +238,8 @@ public class RegionFile implements AutoCloseable {
             int sectorNumber = offset >> 8;
             int numSectors = offset & 0xFF;
 
+            System.out.printf("Sector: %d, %d sectors\n", sectorNumber, numSectors);
+
             if (sectorNumber + numSectors > sectorFree.size()) {
                 debugln("READ", x, z, "invalid sector");
                 return null;
@@ -258,6 +261,7 @@ public class RegionFile implements AutoCloseable {
             } else {
                 byte[] data = new byte[length - 1];
                 this.file.readFully(data);
+                System.out.println(Hexadecimal.encode(data));
                 InputStream in = new ByteArrayInputStream(data);
                 in = streamCreator.apply(in);
                 return new DataInputStream(in);

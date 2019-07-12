@@ -35,6 +35,7 @@ repositories {
 ext {
     gsonVersion = "2.8.5"
     junitVersion = "4.12"
+    nettyVersion = "4.1.36.Final"
     porklibVersion = "0.4.0-SNAPSHOT"
 }
 
@@ -43,6 +44,8 @@ dependencies {
     compile "net.daporkchop.lib:logging:$porklibVersion"
     compile "net.daporkchop.lib:nbt:$porklibVersion"
     compile "net.daporkchop.lib:primitive:$porklibVersion"
+
+    compile "io.netty:netty-buffer:$nettyVersion"
 
     compile "com.google.code.gson:gson:$gsonVersion"
 

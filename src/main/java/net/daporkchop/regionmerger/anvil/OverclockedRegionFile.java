@@ -16,11 +16,17 @@
 package net.daporkchop.regionmerger.anvil;
 
 import com.zaxxer.sparsebits.SparseBitSet;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.PooledByteBufAllocator;
 import lombok.Getter;
 import lombok.NonNull;
 import net.daporkchop.lib.binary.stream.DataIn;
 import net.daporkchop.lib.binary.stream.DataOut;
+import net.daporkchop.lib.common.cache.SoftThreadCache;
+import net.daporkchop.lib.common.cache.ThreadCache;
 import net.daporkchop.lib.common.misc.file.PFiles;
+import net.daporkchop.lib.common.util.PorkUtil;
+import net.daporkchop.lib.encoding.Hexadecimal;
 import net.daporkchop.lib.encoding.compression.Compression;
 import net.daporkchop.lib.encoding.compression.CompressionHelper;
 import net.daporkchop.lib.primitive.map.ByteObjMap;
@@ -28,15 +34,18 @@ import net.daporkchop.lib.primitive.map.ObjByteMap;
 import net.daporkchop.lib.primitive.map.hash.open.ByteObjOpenHashMap;
 import net.daporkchop.lib.primitive.map.hash.open.ObjByteOpenHashMap;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.Constructor;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.Arrays;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.zip.GZIPInputStream;
@@ -67,7 +76,6 @@ public class OverclockedRegionFile implements AutoCloseable {
     protected static final ByteObjMap<CompressionHelper> COMPRESSION_IDS         = new ByteObjOpenHashMap<>();
     protected static final ObjByteMap<CompressionHelper> REVERSE_COMPRESSION_IDS = new ObjByteOpenHashMap<>();
     protected static final byte[]                        EMPTY_SECTOR            = new byte[SECTOR_BYTES];
-    protected static final ThreadLocal<ByteBuffer>       BUFFER_CACHE            = ThreadLocal.withInitial(() -> ByteBuffer.allocateDirect(1 << 20)); //1 MB
 
     static {
         //id => compression algo
@@ -174,7 +182,7 @@ public class OverclockedRegionFile implements AutoCloseable {
      * @throws IOException if an IO exception occurs you dummy
      */
     public InputStream read(int x, int z) throws IOException {
-        ByteBuffer buffer = this.readDirect(x, z);
+        ByteBuf buffer = this.readDirect(x, z);
         if (buffer == null) {
             return null;
         }
@@ -182,8 +190,7 @@ public class OverclockedRegionFile implements AutoCloseable {
         if (compressionId == ID_NONE) {
             return DataIn.wrap(buffer);
         } else {
-            //return COMPRESSION_IDS.get(compressionId).inflate(DataIn.wrap(buffer));
-            return new InflaterInputStream(DataIn.wrap(buffer));
+            return COMPRESSION_IDS.get(compressionId).inflate(DataIn.wrapAsStream(buffer));
         }
     }
 
@@ -198,8 +205,9 @@ public class OverclockedRegionFile implements AutoCloseable {
      * @return a buffer containing the raw contents of the chunk, or {@code null} if the chunk is not present
      * @throws IOException if an IO exception occurs you dummy
      */
-    public ByteBuffer readDirect(int x, int z) throws IOException {
-        ByteBuffer buffer = (ByteBuffer) BUFFER_CACHE.get().clear();
+    public ByteBuf readDirect(int x, int z) throws IOException {
+        ByteBuf buffer = PooledByteBufAllocator.DEFAULT.ioBuffer();
+        //ByteBuffer buffer = (ByteBuffer) ByteBuffer.allocateDirect(1 << 20).clear();
         return this.readDirect(x, z, buffer) ? buffer : null;
     }
 
@@ -212,7 +220,7 @@ public class OverclockedRegionFile implements AutoCloseable {
      * @return {@code true} if the chunk exists and could successfully be read into the buffer, {@code false} otherwise
      * @throws IOException if an IO exception occurs you dummy
      */
-    public boolean readDirect(int x, int z, @NonNull ByteBuffer buffer) throws IOException {
+    public boolean readDirect(int x, int z, @NonNull ByteBuf buffer) throws IOException {
         ensureInBounds(x, z);
 
         this.lock.readLock().lock();
@@ -222,7 +230,11 @@ public class OverclockedRegionFile implements AutoCloseable {
                 return false;
             }
 
-            buffer.limit((offset & 0xFF) * SECTOR_BYTES);
+            System.out.printf("Sector: %d, %d sectors\n", offset >> 8, offset & 0xFF);
+
+            int bytesToRead = (offset & 0xFF) * SECTOR_BYTES;
+            buffer.setBytes()
+            buffer.limit();
             this.channel.read(buffer, (offset >> 8) * SECTOR_BYTES);
             if (buffer.hasRemaining()) {
                 throw new IOException(String.format("Couldn't read whole chunk! %d bytes remaining.", buffer.remaining()));
@@ -363,6 +375,7 @@ public class OverclockedRegionFile implements AutoCloseable {
     @Override
     public void close() throws IOException {
         this.index.force();
+        PorkUtil.release(this.index);
         this.channel.close();
     }
 }
