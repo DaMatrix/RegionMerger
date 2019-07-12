@@ -92,9 +92,6 @@ public class RegionFile implements AutoCloseable {
 
         inflaterCreatorMap.put(VERSION_RAW, i -> i);
         deflaterCreatorMap.put(VERSION_RAW, i -> i);
-
-        //inflaterCreatorMap.put(VERSION_XZIP, EnumCompression.XZIP::inflateStream);
-        //deflaterCreatorMap.put(VERSION_XZIP, EnumCompression.XZIP::compressStream);
     }
 
     private static final int SECTOR_BYTES = 4096;
@@ -238,8 +235,6 @@ public class RegionFile implements AutoCloseable {
             int sectorNumber = offset >> 8;
             int numSectors = offset & 0xFF;
 
-            System.out.printf("Sector: %d, %d sectors\n", sectorNumber, numSectors);
-
             if (sectorNumber + numSectors > sectorFree.size()) {
                 debugln("READ", x, z, "invalid sector");
                 return null;
@@ -261,7 +256,6 @@ public class RegionFile implements AutoCloseable {
             } else {
                 byte[] data = new byte[length - 1];
                 this.file.readFully(data);
-                System.out.println(Hexadecimal.encode(data));
                 InputStream in = new ByteArrayInputStream(data);
                 in = streamCreator.apply(in);
                 return new DataInputStream(in);

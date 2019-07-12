@@ -33,45 +33,50 @@ public class AnvilTest {
         byte[] b = new byte[1024];
 
         System.out.println("Re-compressing using Mojang's RegionFile");
-        try (RegionFile src = new RegionFile(file);
-             RegionFile dst = new RegionFile(new File("./mojang.mca"))) {
-            for (int x = 31; x >= 0; x--)   {
-                for (int z = 31; z >= 0; z--)   {
-                    try (InputStream in = src.getChunkDataInputStream(x, z);
-                         OutputStream out = dst.getChunkDataOutputStream(x, z)) {
-                        for (int i; (i = in.read(b)) != -1;)    {
-                            out.write(b, 0, i);
+        {
+            long time = System.currentTimeMillis();
+            try (RegionFile src = new RegionFile(file);
+                 RegionFile dst = new RegionFile(new File("./mojang.mca"))) {
+                for (int x = 31; x >= 0; x--) {
+                    for (int z = 31; z >= 0; z--) {
+                        try (InputStream in = src.getChunkDataInputStream(x, z);
+                             OutputStream out = dst.getChunkDataOutputStream(x, z)) {
+                            for (int i; (i = in.read(b)) != -1; ) {
+                                out.write(b, 0, i);
+                            }
                         }
                     }
-                    break;
                 }
-                break;
             }
+            System.out.printf("Took %dms!\n", System.currentTimeMillis() - time);
         }
 
         System.out.println("Re-compressing using OverclockedRegionFile");
-        try (OverclockedRegionFile src = new OverclockedRegionFile(file);
-             OverclockedRegionFile dst = new OverclockedRegionFile(new File("./pork.mca"))) {
-            for (int x = 31; x >= 0; x--)   {
-                for (int z = 31; z >= 0; z--)   {
-                    try (InputStream in = src.read(x, z);
-                         OutputStream out = dst.write(x, z, Compression.GZIP_HIGH)) {
-                        for (int i, j = 0; (i = in.read(b)) != -1; j += i)    {
-                            out.write(b, 0, i);
-                        }
+        {
+            long time = System.currentTimeMillis();
+            try (OverclockedRegionFile src = new OverclockedRegionFile(file);
+                 OverclockedRegionFile dst = new OverclockedRegionFile(new File("./pork.mca"))) {
+                for (int x = 31; x >= 0; x--) {
+                    for (int z = 31; z >= 0; z--) {
+                        dst.writeDirect(x, z, src.readDirect(x, z));
+                        /*try (InputStream in = src.read(x, z);
+                             OutputStream out = dst.write(x, z, Compression.GZIP_HIGH)) {
+                            for (int i; (i = in.read(b)) != -1; ) {
+                                out.write(b, 0, i);
+                            }
+                        }*/
                     }
-                    break;
                 }
-                break;
             }
+            System.out.printf("Took %dms!\n", System.currentTimeMillis() - time);
         }
 
         System.out.println("Final checks:");
         System.out.println("  Mojang:");
-        try (RegionFile src = new RegionFile(file)) {
+        try (RegionFile src = new RegionFile(new File("./mojang.mca"))) {
         }
         System.out.println("  Pork:");
-        try (OverclockedRegionFile src = new OverclockedRegionFile(file)) {
+        try (OverclockedRegionFile src = new OverclockedRegionFile(new File("./pork.mca"))) {
         }
     }
 }
