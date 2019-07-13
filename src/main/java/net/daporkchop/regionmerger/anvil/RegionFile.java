@@ -31,10 +31,10 @@
 package net.daporkchop.regionmerger.anvil;
 
 import com.zaxxer.sparsebits.SparseBitSet;
+import net.daporkchop.lib.common.function.io.IOFunction;
 import net.daporkchop.lib.encoding.compression.Compression;
 import net.daporkchop.lib.primitive.map.IntObjMap;
 import net.daporkchop.lib.primitive.map.hash.open.IntObjOpenHashMap;
-import net.daporkchop.regionmerger.util.IOEFunction;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -96,12 +96,12 @@ public class RegionFile implements AutoCloseable {
     private static final int PORKIAN_VERSION_MASK = 0x80;
     private static final int VERSION_RAW          = PORKIAN_VERSION_MASK | 1;
 
-    private static final IntObjMap<IOEFunction<InputStream, InputStream>>   inflaterCreatorMap = new IntObjOpenHashMap<>();
-    private static final IntObjMap<IOEFunction<OutputStream, OutputStream>> deflaterCreatorMap = new IntObjOpenHashMap<>();
-    private static final int SECTOR_BYTES = 4096;
-    private static final int SECTOR_INTS  = SECTOR_BYTES / 4;
-    static final         int  CHUNK_HEADER_SIZE = 5;
-    private static final byte emptySector[]     = new byte[4096];
+    private static final IntObjMap<IOFunction<InputStream, InputStream>>   inflaterCreatorMap = new IntObjOpenHashMap<>();
+    private static final IntObjMap<IOFunction<OutputStream, OutputStream>> deflaterCreatorMap = new IntObjOpenHashMap<>();
+    private static final int                                               SECTOR_BYTES       = 4096;
+    private static final int                                               SECTOR_INTS        = SECTOR_BYTES / 4;
+    static final         int                                               CHUNK_HEADER_SIZE  = 5;
+    private static final byte                                              emptySector[]      = new byte[4096];
 
     static {
         inflaterCreatorMap.put(VERSION_GZIP, GZIPInputStream::new);
@@ -265,7 +265,7 @@ public class RegionFile implements AutoCloseable {
             }
 
             int version = file.readByte() & 0xFF;
-            IOEFunction<InputStream, InputStream> streamCreator = inflaterCreatorMap.get(version);
+            IOFunction<InputStream, InputStream> streamCreator = inflaterCreatorMap.get(version);
             if (streamCreator == null) {
                 debugln("READ", x, z, "unknown version " + version);
                 return null;

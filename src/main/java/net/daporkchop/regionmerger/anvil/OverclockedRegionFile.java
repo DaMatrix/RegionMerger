@@ -133,19 +133,30 @@ public class OverclockedRegionFile implements AutoCloseable {
     protected final boolean readOnly;
 
     public OverclockedRegionFile(@NonNull File file) throws IOException {
+        this(file, false, false);
+    }
+
+    public OverclockedRegionFile(@NonNull File file, boolean readOnly, boolean writeRequired) throws IOException {
         PFiles.ensureDirectoryExists(file.getParentFile());
 
         {
             Path path = file.toPath();
             FileChannel channel;
-            boolean readOnly = false;
             try {
-                channel = FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE);
+                if (readOnly)   {
+                    channel = FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.READ);
+                } else {
+                    channel = FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE);
+                }
             } catch (IOException e) {
-                //try opening the file read-only
-                //if this fails, then we don't have any filesystem access and won't be able to do anything about it, so the exception is thrown
-                channel = FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.READ);
-                readOnly = true;
+                if (readOnly || writeRequired)  {
+                    throw e;
+                } else {
+                    //try opening the file read-only
+                    //if this fails, then we don't have any filesystem access and won't be able to do anything about it, so the exception is thrown
+                    channel = FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.READ);
+                    readOnly = true;
+                }
             }
 
             this.channel = channel;

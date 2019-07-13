@@ -16,9 +16,26 @@
 package net.daporkchop.regionmerger;
 
 import net.daporkchop.lib.logging.Logging;
-import java.io.IOException;
+import net.daporkchop.regionmerger.mode.Mode;
+import net.daporkchop.regionmerger.mode.optimize.OptimizeMode;
+import net.daporkchop.regionmerger.option.Arguments;
 
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * @author DaPorkchop_
+ */
 public class RegionMerger implements Logging {
+    public static final Map<String, Mode> MODES = new HashMap<String, Mode>()   {
+        {
+            this.put("optimize", new OptimizeMode());
+        }
+    };
+
     public static void main(String... args) throws IOException {
         logger.enableANSI();
         if (args.length == 0 || (args.length == 1 && "--help".equals(args[0]))) {
@@ -50,5 +67,14 @@ public class RegionMerger implements Logging {
                   .info("          add           Add all the chunks from every input into the output world, without removing any");
             return;
         }
+
+        Mode mode = MODES.get(args[0]);
+        if (mode == null)   {
+            logger.error("Unknown mode: \"%s\"", args[0]);
+            return;
+        }
+        Arguments arguments = mode.arguments();
+        arguments.load(Arrays.asList(Arrays.copyOfRange(args, 1, args.length)).iterator());
+        mode.run(arguments);
     }
 }
