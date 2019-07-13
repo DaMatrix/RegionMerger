@@ -176,7 +176,7 @@ public class OverclockedRegionFile implements AutoCloseable {
             }
         }
 
-        if (DEBUG_SECTORS)  {
+        if (DEBUG_SECTORS) {
             System.out.println(this.occupiedSectors);
         }
     }
@@ -269,28 +269,31 @@ public class OverclockedRegionFile implements AutoCloseable {
      */
     public DataOut write(int x, int z, @NonNull CompressionHelper compression, byte compressionId) throws IOException {
         ensureInBounds(x, z);
+        if (this.readOnly) {
+            throw new IllegalStateException("File is opened read-only!");
+        } else {
+            return new DataOut() {
+                private final ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(SECTOR_BYTES).writeInt(-1).writeByte(compressionId);
+                private final OutputStream delegate = compression.deflate(NettyUtil.wrapOut(buf));
 
-        return new DataOut() {
-            private final ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(SECTOR_BYTES).writeInt(-1).writeByte(compressionId);
-            private final OutputStream delegate = compression.deflate(NettyUtil.wrapOut(buf));
+                @Override
+                public void write(int b) throws IOException {
+                    this.delegate.write(b);
+                }
 
-            @Override
-            public void write(int b) throws IOException {
-                this.delegate.write(b);
-            }
+                @Override
+                public void write(byte[] b, int off, int len) throws IOException {
+                    this.delegate.write(b, off, len);
+                }
 
-            @Override
-            public void write(byte[] b, int off, int len) throws IOException {
-                this.delegate.write(b, off, len);
-            }
+                @Override
+                public void close() throws IOException {
+                    this.delegate.close();
 
-            @Override
-            public void close() throws IOException {
-                this.delegate.close();
-
-                OverclockedRegionFile.this.doWrite(x, z, this.buf.setInt(0, this.buf.readableBytes() - LENGTH_HEADER_SIZE), true);
-            }
-        };
+                    OverclockedRegionFile.this.doWrite(x, z, this.buf.setInt(0, this.buf.readableBytes() - LENGTH_HEADER_SIZE), true);
+                }
+            };
+        }
     }
 
     /**
@@ -304,7 +307,12 @@ public class OverclockedRegionFile implements AutoCloseable {
      * @throws IOException if an IO exception occurs you dummy
      */
     public void writeDirect(int x, int z, @NonNull byte[] b) throws IOException {
-        this.doWrite(x, z, Unpooled.wrappedBuffer(ToBytes.toBytes(b.length), b), false);
+        ensureInBounds(x, z);
+        if (this.readOnly) {
+            throw new IllegalStateException("File is opened read-only!");
+        } else {
+            this.doWrite(x, z, Unpooled.wrappedBuffer(ToBytes.toBytes(b.length), b), false);
+        }
     }
 
     /**
@@ -318,8 +326,11 @@ public class OverclockedRegionFile implements AutoCloseable {
      */
     public void writeDirect(int x, int z, @NonNull ByteBuf buf) throws IOException {
         ensureInBounds(x, z);
-
-        this.doWrite(x, z, buf, true);
+        if (this.readOnly) {
+            throw new IllegalStateException("File is opened read-only!");
+        } else {
+            this.doWrite(x, z, buf, true);
+        }
     }
 
     /**
@@ -405,7 +416,9 @@ public class OverclockedRegionFile implements AutoCloseable {
         this.lock.writeLock().lock();
         try {
             if (this.open.compareAndSet(true, false)) {
-                this.index.force();
+                if (!this.readOnly) {
+                    this.index.force();
+                }
                 PorkUtil.release(this.index);
                 this.channel.close();
             }
