@@ -53,23 +53,35 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * they should be avoided.
  *
  * @author DaPorkchop_
+ * @see RegionFile for the region spec
  */
 public class OverclockedRegionFile implements AutoCloseable {
-    protected static final int CHUNK_HEADER_SIZE = 5;
-    protected static final int SECTOR_BYTES      = 4096;
-    protected static final int SECTOR_INTS       = SECTOR_BYTES >> 2;
+    protected static final int LENGTH_HEADER_SIZE  = 4;
+    protected static final int VERSION_HEADER_SIZE = 1;
+    protected static final int CHUNK_HEADER_SIZE   = LENGTH_HEADER_SIZE + VERSION_HEADER_SIZE;
+    protected static final int SECTOR_BYTES        = 4096;
+    protected static final int SECTOR_INTS         = SECTOR_BYTES >> 2;
 
-    public static final byte ID_NONE    = 0;
+    /**
+     * A bitmask to identify non-official compression versions.
+     * <p>
+     * Any version containing this mask is unofficial, added by me.
+     */
+    public static final byte PORKIAN_ID_MASK = (byte) 0x80;
+
     public static final byte ID_GZIP    = 1; //official, no longer used by vanilla
     public static final byte ID_DEFLATE = 2; //official
-    public static final byte ID_BZIP2   = 3;
-    public static final byte ID_LZ4     = 4;
-    public static final byte ID_LZMA    = 5;
-    public static final byte ID_XZ      = 6;
+    public static final byte ID_NONE    = PORKIAN_ID_MASK | 0;
+    public static final byte ID_BZIP2   = PORKIAN_ID_MASK | 1;
+    public static final byte ID_LZ4     = PORKIAN_ID_MASK | 2;
+    public static final byte ID_LZMA    = PORKIAN_ID_MASK | 3;
+    public static final byte ID_XZ      = PORKIAN_ID_MASK | 4;
 
     protected static final ByteObjMap<CompressionHelper> COMPRESSION_IDS         = new ByteObjOpenHashMap<>();
     protected static final ObjByteMap<CompressionHelper> REVERSE_COMPRESSION_IDS = new ObjByteOpenHashMap<>();
     protected static final byte[]                        EMPTY_SECTOR            = new byte[SECTOR_BYTES];
+
+    protected static final boolean DEBUG_SECTORS = false;
 
     static {
         //id => compression algo
@@ -164,7 +176,9 @@ public class OverclockedRegionFile implements AutoCloseable {
             }
         }
 
-        System.out.println(this.occupiedSectors);
+        if (DEBUG_SECTORS)  {
+            System.out.println(this.occupiedSectors);
+        }
     }
 
     /**
@@ -217,7 +231,7 @@ public class OverclockedRegionFile implements AutoCloseable {
             if (read != bytesToRead) {
                 throw new IOException(String.format("Read %d/%d bytes!", read, bytesToRead));
             }
-            return buf.readSlice(buf.getInt(0) + 4);
+            return buf.slice(0, buf.getInt(0) + LENGTH_HEADER_SIZE);
         } finally {
             this.lock.readLock().unlock();
         }
@@ -274,7 +288,7 @@ public class OverclockedRegionFile implements AutoCloseable {
             public void close() throws IOException {
                 this.delegate.close();
 
-                OverclockedRegionFile.this.doWrite(x, z, this.buf.setInt(0, this.buf.readableBytes() - 4), true);
+                OverclockedRegionFile.this.doWrite(x, z, this.buf.setInt(0, this.buf.readableBytes() - LENGTH_HEADER_SIZE), true);
             }
         };
     }
@@ -325,7 +339,7 @@ public class OverclockedRegionFile implements AutoCloseable {
             int size = buf.readableBytes();
             if (size < CHUNK_HEADER_SIZE || buf.readableBytes() > (1 << 20)) {
                 throw new IllegalArgumentException("Invalid input length!");
-            } else if (buf.getInt(0) + 4 != size) {
+            } else if (buf.getInt(0) + LENGTH_HEADER_SIZE != size) {
                 throw new IllegalArgumentException("Invalid chunk data: length header doesn't correspond to input length!");
             }
 
@@ -357,7 +371,7 @@ public class OverclockedRegionFile implements AutoCloseable {
                 this.occupiedSectors.set(i, i + requiredSectors);
                 this.setOffset(x, z, offset = requiredSectors | (i << 8));
             }
-            if (buf.readBytes(this.channel, (offset >> 8) * SECTOR_BYTES, size) != size)    {
+            if (buf.readBytes(this.channel, (offset >> 8) * SECTOR_BYTES, size) != size) {
                 throw new IllegalStateException("Unable to write all bytes to disk!");
             }
         } finally {
@@ -373,11 +387,11 @@ public class OverclockedRegionFile implements AutoCloseable {
     }
 
     private int getOffset(int x, int z) {
-        return this.index.getInt((x + z * 32) * 4);
+        return this.index.getInt((x << 2) | (z << 7));
     }
 
     private void setOffset(int x, int z, int offset) {
-        this.index.putInt((x + z * 32) * 4, offset);
+        this.index.putInt((x << 2) | (z << 7), offset);
     }
 
     private void ensureOpen() {
