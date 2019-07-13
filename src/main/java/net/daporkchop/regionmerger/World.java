@@ -60,4 +60,8 @@ public class World {
                              .map(m -> new Vec2i(Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2))))
                              .collect(Collectors.toSet());
     }
+
+    public File getAsFile(@NonNull Vec2i regionPos) {
+        return new File(this.regionDir, String.format("r.%d.%d.mca", regionPos.getX(), regionPos.getY()));
+    }
 }

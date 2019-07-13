@@ -56,11 +56,11 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * @see RegionFile for the region spec
  */
 public class OverclockedRegionFile implements AutoCloseable {
-    protected static final int LENGTH_HEADER_SIZE  = 4;
-    protected static final int VERSION_HEADER_SIZE = 1;
-    protected static final int CHUNK_HEADER_SIZE   = LENGTH_HEADER_SIZE + VERSION_HEADER_SIZE;
-    protected static final int SECTOR_BYTES        = 4096;
-    protected static final int SECTOR_INTS         = SECTOR_BYTES >> 2;
+    public static final int LENGTH_HEADER_SIZE  = 4;
+    public static final int VERSION_HEADER_SIZE = 1;
+    public static final int CHUNK_HEADER_SIZE   = LENGTH_HEADER_SIZE + VERSION_HEADER_SIZE;
+    public static final int SECTOR_BYTES        = 4096;
+    public static final int SECTOR_INTS         = SECTOR_BYTES >> 2;
 
     /**
      * A bitmask to identify non-official compression versions.

@@ -17,6 +17,7 @@ package net.daporkchop.regionmerger.mode;
 
 import lombok.NonNull;
 import net.daporkchop.lib.logging.Logger;
+import net.daporkchop.lib.logging.Logging;
 import net.daporkchop.regionmerger.option.Arguments;
 
 import java.io.IOException;
@@ -24,7 +25,7 @@ import java.io.IOException;
 /**
  * @author DaPorkchop_
  */
-public interface Mode {
+public interface Mode extends Logging {
     /**
      * Prints a usage message for this mode.
      */

@@ -16,8 +16,10 @@
 package net.daporkchop.regionmerger.option;
 
 import lombok.NonNull;
+import net.daporkchop.regionmerger.World;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.Map;
@@ -37,7 +39,7 @@ public class Arguments {
     protected final boolean hasSources;
 
     public Arguments(boolean hasDst, boolean hasSources, @NonNull Option... options) {
-        this.options = Arrays.stream(options).collect(Collectors.toMap(Option::name, o -> o));
+        this.options = Arrays.stream(options).collect(Collectors.toMap(o -> String.format("-%s", o.name()), o -> o));
 
         this.hasDst = hasDst;
         this.hasSources = hasSources;
@@ -87,6 +89,14 @@ public class Arguments {
                 }
             });
         }
+    }
+
+    public World getDestination()   {
+        return this.get(Option.DESTINATION);
+    }
+
+    public Collection<World> getSources()   {
+        return this.get(Option.SOURCES);
     }
 
     public <V> V get(@NonNull Option<V> option) {
