@@ -18,11 +18,11 @@ package net.daporkchop.regionmerger;
 import net.daporkchop.lib.logging.Logging;
 import net.daporkchop.regionmerger.mode.Mode;
 import net.daporkchop.regionmerger.mode.findmissing.FindMissing;
-import net.daporkchop.regionmerger.mode.optimize.OptimizeMode;
+import net.daporkchop.regionmerger.mode.merge.Merge;
+import net.daporkchop.regionmerger.mode.optimize.Optimize;
 import net.daporkchop.regionmerger.option.Arguments;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -34,14 +34,21 @@ public class RegionMerger implements Logging {
     public static final Map<String, Mode> MODES = new HashMap<String, Mode>()   {
         {
             this.put("findmissing", new FindMissing());
-            this.put("optimize", new OptimizeMode());
+            this.put("merge", new Merge());
+            this.put("optimize", new Optimize());
         }
     };
 
     public static void main(String... args) throws IOException {
         logger.enableANSI();
+
+        Thread.setDefaultUncaughtExceptionHandler((thread, e) -> {
+            logger.channel(thread.getName()).alert(e);
+            System.exit(1);
+        });
+
         if (args.length == 0 || (args.length == 1 && "--help".equals(args[0]))) {
-            logger.channel("Help")
+            /*logger.channel("Help")
                   .info("PorkRegionMerger v0.0.8")
                   .info("")
                   .info("--help                  Show this help message")
@@ -66,7 +73,7 @@ public class RegionMerger implements Logging {
                   .info("  Modes:  merge         Simply merges all chunks from all regions into the output")
                   .info("          area          Merges all chunks in a specified area into the output")
                   .info("          findmissing   Finds all chunks that aren't defined in an input and dumps them to a json file. Uses settings from area mode.")
-                  .info("          add           Add all the chunks from every input into the output world, without removing any");
+                  .info("          add           Add all the chunks from every input into the output world, without removing any");*/
             return;
         }
 
@@ -78,5 +85,7 @@ public class RegionMerger implements Logging {
         Arguments arguments = mode.arguments();
         arguments.load(Arrays.asList(Arrays.copyOfRange(args, 1, args.length)).iterator());
         mode.run(arguments);
+
+        logger.success("Done!");
     }
 }

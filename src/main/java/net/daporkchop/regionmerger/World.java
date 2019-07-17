@@ -38,21 +38,19 @@ public class World {
 
     protected final Collection<Vec2i> regions;
     protected final File              path;
-    protected final File              regionDir;
     protected final boolean           readOnly;
 
     public World(@NonNull File path, boolean readOnly) {
         this.path = path;
-        this.regionDir = new File(path, "region/");
         this.readOnly = readOnly;
 
         if (!path.exists()) {
             if (readOnly) {
                 throw new IllegalStateException(String.format("World \"%s\" doesn't exist!", path.getAbsolutePath()));
             }
-            PFiles.ensureDirectoryExists(this.regionDir);
+            PFiles.ensureDirectoryExists(this.path);
         }
-        this.regions = Arrays.stream(this.regionDir.listFiles())
+        this.regions = Arrays.stream(this.path.listFiles())
                              .filter(File::isFile)
                              .map(File::getName)
                              .map(REGION_PATTERN::matcher)
@@ -62,6 +60,6 @@ public class World {
     }
 
     public File getAsFile(@NonNull Vec2i regionPos) {
-        return new File(this.regionDir, String.format("r.%d.%d.mca", regionPos.getX(), regionPos.getY()));
+        return new File(this.path, String.format("r.%d.%d.mca", regionPos.getX(), regionPos.getY()));
     }
 }

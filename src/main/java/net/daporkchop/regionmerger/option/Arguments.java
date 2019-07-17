@@ -22,6 +22,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
@@ -95,7 +96,7 @@ public class Arguments {
         return this.get(Option.DESTINATION);
     }
 
-    public Collection<World> getSources()   {
+    public List<World> getSources()   {
         return this.get(Option.SOURCES);
     }
 

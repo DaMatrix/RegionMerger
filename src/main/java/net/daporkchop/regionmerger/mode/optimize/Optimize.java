@@ -42,7 +42,7 @@ import java.util.zip.InflaterOutputStream;
 /**
  * @author DaPorkchop_
  */
-public class OptimizeMode implements Mode {
+public class Optimize implements Mode {
     protected static final Option.Flag RECOMPRESS = Option.flag("c");
     protected static final Option.Int  LEVEL      = Option.integer("l", 7, 0, 8);
 

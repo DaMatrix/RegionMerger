@@ -27,6 +27,8 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
 
 /**
  * @author DaPorkchop_
@@ -54,7 +56,7 @@ public interface Option<V> {
         }
     };
 
-    Option<Collection<World>> SOURCES = new Option<Collection<World>>() {
+    Option<List<World>> SOURCES = new Option<List<World>>() {
         @Override
         public String name() {
             return "dst";
@@ -66,8 +68,8 @@ public interface Option<V> {
         }
 
         @Override
-        public Collection<World> parse(@NonNull String word, @NonNull Iterator<String> itr) {
-            Collection<World> sources = new HashSet<>();
+        public List<World> parse(@NonNull String word, @NonNull Iterator<String> itr) {
+            List<World> sources = new LinkedList<>();
             do {
                 sources.add(new World(new File(word), true));
             } while (itr.hasNext() && (word = itr.next()) != null);
@@ -75,7 +77,7 @@ public interface Option<V> {
         }
 
         @Override
-        public Collection<World> fallbackValue() {
+        public List<World> fallbackValue() {
             return Collections.emptyList();
         }
     };
