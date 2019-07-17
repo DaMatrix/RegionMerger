@@ -17,6 +17,7 @@ package net.daporkchop.regionmerger;
 
 import net.daporkchop.lib.logging.Logging;
 import net.daporkchop.regionmerger.mode.Mode;
+import net.daporkchop.regionmerger.mode.findmissing.FindMissing;
 import net.daporkchop.regionmerger.mode.optimize.OptimizeMode;
 import net.daporkchop.regionmerger.option.Arguments;
 
@@ -32,6 +33,7 @@ import java.util.Map;
 public class RegionMerger implements Logging {
     public static final Map<String, Mode> MODES = new HashMap<String, Mode>()   {
         {
+            this.put("findmissing", new FindMissing());
             this.put("optimize", new OptimizeMode());
         }
     };

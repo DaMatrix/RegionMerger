@@ -18,6 +18,7 @@ package net.daporkchop.regionmerger.mode.optimize;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.PooledByteBufAllocator;
 import lombok.NonNull;
+import net.daporkchop.lib.binary.netty.NettyUtil;
 import net.daporkchop.lib.common.function.io.IOConsumer;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.regionmerger.World;
@@ -28,22 +29,26 @@ import net.daporkchop.regionmerger.option.Option;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.channels.FileChannel;
 import java.nio.file.StandardOpenOption;
 import java.util.Collection;
 import java.util.stream.Collectors;
+import java.util.zip.Deflater;
+import java.util.zip.DeflaterOutputStream;
+import java.util.zip.Inflater;
+import java.util.zip.InflaterOutputStream;
 
 /**
  * @author DaPorkchop_
  */
 public class OptimizeMode implements Mode {
     protected static final Option.Flag RECOMPRESS = Option.flag("c");
-    protected static final Option.Flag USE_GZIP   = Option.flag("g");
     protected static final Option.Int  LEVEL      = Option.integer("l", 7, 0, 8);
 
     @Override
     public void printUsage(@NonNull Logger logger) {
-        logger.info("Optimize:")
+        logger.info("optimize:")
               .info("  Optimizes the size of a world by defragmenting and optionally re-compressing the regions.")
               .info("  This is only useful for worlds that will later be served read-only, as allowing the Minecraft client/server write access to an")
               .info("  optimized world will cause size to increase again.")
@@ -53,14 +58,12 @@ public class OptimizeMode implements Mode {
               .info("  Options:")
               .info("  -c          Enables re-compression of chunks. This will significantly increase the runtime (and CPU usage), but can help decrease")
               .info("              output size further.")
-              .info("  -g          Use GZIP instead of DEFLATE for compression. This will increase runtime time, but may slightly reduce the size. Only")
-              .info("              effective with -c.")
               .info("  -l <level>  Sets the level (intensity) of the compression, from 0-8. 0 is the worst, 8 is the best. Only effective with -c. Default: 7");
     }
 
     @Override
     public Arguments arguments() {
-        return new Arguments(true, false, RECOMPRESS, USE_GZIP, LEVEL);
+        return new Arguments(true, false, RECOMPRESS, LEVEL);
     }
 
     @Override
@@ -70,39 +73,79 @@ public class OptimizeMode implements Mode {
 
     @Override
     public void run(@NonNull Arguments args) throws IOException {
-        boolean recompress = args.get(RECOMPRESS);
-        boolean gzip = args.get(USE_GZIP);
-        int level = args.get(LEVEL);
-        World world = args.getDestination();
+        final boolean recompress = args.get(RECOMPRESS);
+        final int level = args.get(LEVEL);
+        final World world = args.getDestination();
 
         Collection<File> regionsAsFiles = world.regions().stream().map(world::getAsFile).collect(Collectors.toList());
 
         long initialSize = regionsAsFiles.parallelStream().mapToLong(File::length).sum();
         logger.info("Initial size: %.2f MB", initialSize / (1024.0d * 1024.0d));
 
+        ChunkRecoder recoder;
+        if (recompress) {
+            ThreadLocal<Inflater> inflaterCache = ThreadLocal.withInitial(Inflater::new);
+            ThreadLocal<Deflater> deflaterCache = ThreadLocal.withInitial(() -> new Deflater(level));
+            recoder = (region, buf, x, z) -> {
+                ByteBuf chunk = region.readDirect(x, z);
+                if (chunk != null)  {
+                    try {
+                        int oldIndex = buf.writerIndex();
+                        buf.writeInt(-1).writeByte(OverclockedRegionFile.ID_DEFLATE);
+                        if (chunk.readerIndex(4).readByte() != OverclockedRegionFile.ID_DEFLATE)    {
+                            throw new IllegalStateException("Can't optimize GZIPped chunks!");
+                        }
+                        try (OutputStream out = new InflaterOutputStream(new DeflaterOutputStream(NettyUtil.wrapOut(buf), deflaterCache.get()), inflaterCache.get()))   {
+                            chunk.readBytes(out, chunk.readableBytes());
+                            if (chunk.isReadable()) {
+                                throw new IllegalStateException("Couldn't copy entire chunk into output buffer!");
+                            }
+                        }
+                        int size = buf.writerIndex() - oldIndex;
+                        buf.setInt(oldIndex, size - 4);
+                        return size / OverclockedRegionFile.SECTOR_BYTES + 1;
+                    } finally {
+                        chunk.release();
+                    }
+                } else {
+                    return -1;
+                }
+            };
+        } else {
+            //simply copy without anything else
+            recoder = (region, buf, x, z) -> {
+                ByteBuf chunk = region.readDirect(x, z);
+                if (chunk != null)  {
+                    try {
+                        int size = chunk.readableBytes();
+                        buf.writeBytes(chunk);
+                        if (chunk.isReadable()) {
+                            throw new IllegalStateException("Couldn't copy entire chunk into output buffer!");
+                        }
+                        return size / OverclockedRegionFile.SECTOR_BYTES + 1;
+                    } finally {
+                        chunk.release();
+                    }
+                } else {
+                    return -1;
+                }
+            };
+        }
+
         regionsAsFiles.parallelStream().forEach((IOConsumer<File>) file -> {
-            ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(OverclockedRegionFile.SECTOR_BYTES * 3);
+            ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(OverclockedRegionFile.SECTOR_BYTES * 3).writerIndex(OverclockedRegionFile.SECTOR_BYTES * 2);
             try {
                 int sector = 2;
                 int chunks = 0;
                 try (OverclockedRegionFile region = new OverclockedRegionFile(file, true, false)) {
                     for (int x = 31; x >= 0; x--) {
                         for (int z = 31; z >= 0; z--) {
-                            ByteBuf chunk = region.readDirect(x, z);
-                            if (chunk != null)  {
-                                try {
-                                    buf.writerIndex(OverclockedRegionFile.SECTOR_BYTES * sector);
-                                    buf.writeBytes(chunk);
-                                    if (chunk.isReadable()) {
-                                        throw new IllegalStateException("Couldn't copy entire chunk into output buffer!");
-                                    }
-                                    int requiredSectors = chunk.readableBytes() / OverclockedRegionFile.SECTOR_BYTES + 1;
-                                    buf.setInt((x << 2) | (z << 7), requiredSectors | (sector << 8));
-                                    sector += requiredSectors;
-                                    chunks++;
-                                } finally {
-                                    chunk.release();
-                                }
+                            int cnt = recoder.recode(region, buf, x, z);
+                            if (cnt != -1)  {
+                                buf.setInt((x << 2) | (z << 7), cnt | (sector << 8));
+                                sector += cnt;
+                                buf.writerIndex(OverclockedRegionFile.SECTOR_BYTES * sector);
+                                chunks++;
                             }
                         }
                     }
@@ -128,5 +171,10 @@ public class OptimizeMode implements Mode {
         long finalSize = regionsAsFiles.parallelStream().mapToLong(File::length).sum();
         logger.success("Done! Processed %d regions (deleting %d empty regions)", oldCount, oldCount - regionsAsFiles.size());
         logger.success("Shrunk by %.2f MB (%.3f%%)", (initialSize - finalSize) / (1024.0d * 1024.0d), (double) finalSize / (double) initialSize);
+    }
+
+    @FunctionalInterface
+    private interface ChunkRecoder  {
+        int recode(@NonNull OverclockedRegionFile region, @NonNull ByteBuf buf, int x, int z) throws IOException;
     }
 }
