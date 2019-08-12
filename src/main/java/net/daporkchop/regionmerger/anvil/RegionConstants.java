@@ -91,4 +91,20 @@ public class RegionConstants {
         REVERSE_COMPRESSION_IDS.put(Compression.XZ_NORMAL, ID_XZ);
         REVERSE_COMPRESSION_IDS.put(Compression.XZ_HIGH, ID_XZ);
     }
+
+    public static void assertInBounds(int x, int z) {
+        if (x < 0 || x >= 32 || z < 0 || z >= 32) {
+            throw new IllegalArgumentException(String.format("Coordinates out of bounds: (%d,%d)", x, z));
+        }
+    }
+
+    public static int getOffsetIndex(int x, int z)  {
+        assertInBounds(x, z);
+        return (x << 2) | (z << 7);
+    }
+
+    public static int getTimestampIndex(int x, int z)  {
+        assertInBounds(x, z);
+        return ((x << 2) | (z << 7)) + SECTOR_BYTES;
+    }
 }

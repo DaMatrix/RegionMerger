@@ -23,8 +23,8 @@ import net.daporkchop.lib.common.function.throwing.ERunnable;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
 import net.daporkchop.regionmerger.World;
-import net.daporkchop.regionmerger.anvil.ex.CannotOpenRegionException;
 import net.daporkchop.regionmerger.anvil.OverclockedRegionFile;
+import net.daporkchop.regionmerger.anvil.ex.CannotOpenRegionException;
 import net.daporkchop.regionmerger.option.Arguments;
 import net.daporkchop.regionmerger.option.Option;
 
@@ -50,14 +50,15 @@ public class Merge implements Mode {
 
     @Override
     public void printUsage(@NonNull Logger logger) {
-        logger.info("merge:")
-                .info("  Copies all distinct chunks from multiple source worlds into a single destination world.")
-                .info("  Note that all paths are to the region directory, not the world directory.")
+        logger.info("  merge:")
+                .info("    Combines multiple source worlds into a single, new destination world.")
+                .info("    Note that all paths are to the region directory, not the world directory.")
                 .info("")
-                .info("  Usage: merge <destination> <source> <source>...")
+                .info("    Usage:")
+                .info("      merge [options] <destination> <source> [source]...")
                 .info("")
-                .info("  Options:")
-                .info("  -p <time>   Sets the time (in ms) between progress updates. Set to 0 to disable. Default: 5000");
+                .info("    Options:")
+                .info("      -p <time>   Sets the time (in ms) between progress updates. Set to 0 to disable. Default: 5000");
     }
 
     @Override
@@ -76,7 +77,8 @@ public class Merge implements Mode {
         final List<World> sources = args.getSources();
 
         if (!dst.regions().isEmpty()) {
-            throw new IllegalStateException("Destination has existing regions!");
+            logger.alert("Destination (\"%s\") has existing regions!\nConsider using add mode to add chunks onto the existing world.");
+            System.exit(1);
         }
 
         Collection<Vec2i> regionPositions = sources.stream()
@@ -128,7 +130,7 @@ public class Merge implements Mode {
                     OverclockedRegionFile region;
                     try {
                         region = new OverclockedRegionFile(world.getAsFile(pos), true, false);
-                    } catch (CannotOpenRegionException e)   {
+                    } catch (CannotOpenRegionException e) {
                         logger.warn(e);
                         continue;
                     }
@@ -145,7 +147,6 @@ public class Merge implements Mode {
                 int chunks = 0;
                 for (int x = 31; x >= 0; x--) {
                     for (int z = 31; z >= 0; z--) {
-                        FIND_REGION_WITH_CHUNK:
                         for (int i = 0; i < regionsCount; i++) {
                             OverclockedRegionFile region = regions[i];
                             if (region.hasChunk(x, z)) {
@@ -160,11 +161,11 @@ public class Merge implements Mode {
                                         throw new IllegalStateException("Couldn't copy entire chunk into output buffer!");
                                     }
                                     cnt = cnt / SECTOR_BYTES + 1;
-                                    buf.setInt((x << 2) | (z << 7), cnt | (sector << 8));
-                                    buf.setInt(((x << 2) | (z << 7)) + SECTOR_BYTES, region.getTimestamp(x, z));
+                                    buf.setInt(getOffsetIndex(x, z), cnt | (sector << 8));
+                                    buf.setInt(getTimestampIndex(x, z), region.getTimestamp(x, z));
                                     sector += cnt;
                                     chunks++;
-                                    break FIND_REGION_WITH_CHUNK;
+                                    break;
                                 } finally {
                                     chunk.release();
                                 }
@@ -187,9 +188,9 @@ public class Merge implements Mode {
                 remainingRegions.getAndDecrement();
             } finally {
                 buf.release();
-                for (int i = regionsCount - 1; i >= 0; i--) {
-                    regions[i].close();
-                    regions[i] = null;
+                while (--regionsCount >= 0) {
+                    regions[regionsCount].close();
+                    regions[regionsCount] = null;
                 }
             }
         });

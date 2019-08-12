@@ -22,8 +22,6 @@ import net.daporkchop.lib.common.function.io.IOFunction;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
 import net.daporkchop.regionmerger.World;
-import net.daporkchop.regionmerger.anvil.OverclockedRegionFile;
-import net.daporkchop.regionmerger.mode.Mode;
 import net.daporkchop.regionmerger.option.Arguments;
 import net.daporkchop.regionmerger.option.Option;
 
@@ -36,11 +34,10 @@ import java.nio.file.OpenOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.StringJoiner;
-import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import static java.lang.Math.min;
-import static net.daporkchop.regionmerger.anvil.RegionConstants.*;
+import static net.daporkchop.regionmerger.anvil.RegionConstants.SECTOR_BYTES;
 
 /**
  * @author DaPorkchop_
@@ -52,22 +49,23 @@ public class FindMissing implements Mode {
     protected static final Option.Int  MAX_Z     = Option.integer("-maxZ", Integer.MIN_VALUE, Integer.MIN_VALUE + 1, Integer.MAX_VALUE);
     protected static final Option.Flag OVERWRITE = Option.flag("o");
 
-    protected static final OpenOption[] REGION_OPEN_OPTIONS = {StandardOpenOption.READ};
+    protected static final OpenOption[] REGION_OPEN_OPTIONS             = {StandardOpenOption.READ};
     protected static final OpenOption[] MISSINGCHUNKS_JSON_OPEN_OPTIONS = {StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING};
 
     @Override
     public void printUsage(@NonNull Logger logger) {
-        logger.info("findmissing:")
-                .info("  Searches for missing chunks within a given area and saves them to a file (missingchunks.json).")
+        logger.info("  findmissing:")
+                .info("    Searches for missing chunks within a given area and saves them to a file (missingchunks.json).")
                 .info("")
-                .info("  Usage: findmissing [options] <path>")
+                .info("    Usage:")
+                .info("      findmissing [options] <path>")
                 .info("")
-                .info("  Options:")
-                .info("  --minX <minX>       Set the min X coord to check (in regions) (inclusive)")
-                .info("  --minZ <minZ>       Set the min Z coord to check (in regions) (inclusive)")
-                .info("  --maxX <minX>       Set the max X coord to check (in regions) (inclusive)")
-                .info("  --maxZ <minZ>       Set the max Z coord to check (in regions) (inclusive)")
-                .info("  -o                  Allows overwriting an existing missingchunks.json file.");
+                .info("    Options:")
+                .info("      --minX <minX>       Set the min X coord to check (in regions) (inclusive)")
+                .info("      --minZ <minZ>       Set the min Z coord to check (in regions) (inclusive)")
+                .info("      --maxX <minX>       Set the max X coord to check (in regions) (inclusive)")
+                .info("      --maxZ <minZ>       Set the max Z coord to check (in regions) (inclusive)")
+                .info("      -o                  Allows overwriting an existing missingchunks.json file.");
     }
 
     @Override
@@ -135,7 +133,7 @@ public class FindMissing implements Mode {
                                 Vec2i[] arr = VEC2I_ARRAY_CACHE.get();
                                 for (int x = 31; x >= 0; x--) {
                                     for (int z = 31; z >= 0; z--) {
-                                        if (buf.getInt((x << 2) | (z << 7)) == 0)   {
+                                        if (buf.getInt((x << 2) | (z << 7)) == 0) {
                                             arr[missing++] = new Vec2i(regionPos.getX() * 32 + x, regionPos.getY() * 32 + z);
                                         }
                                     }

@@ -61,12 +61,6 @@ public class OverclockedRegionFile implements AutoCloseable {
     protected static final OpenOption[] RO_OPEN_OPTIONS = {StandardOpenOption.READ};
     protected static final OpenOption[] RW_OPEN_OPTIONS = {StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE};
 
-    private static void assertInBounds(int x, int z) {
-        if (x < 0 || x >= 32 || z < 0 || z >= 32) {
-            throw new IllegalArgumentException(String.format("Coordinates out of bounds: (%d,%d)", x, z));
-        }
-    }
-
     @Getter
     protected final String           absolutePath;
     protected final FileChannel      channel;
@@ -108,7 +102,8 @@ public class OverclockedRegionFile implements AutoCloseable {
         }
 
         long fileSize = this.channel.size();
-        if (fileSize < SECTOR_BYTES) {
+        if (fileSize < SECTOR_BYTES * 2) {
+            //region headers are incomplete, write empty headers
             try {
                 //write the chunk offset table
                 this.channel.write(ByteBuffer.wrap(EMPTY_SECTOR), 0L);
@@ -351,7 +346,7 @@ public class OverclockedRegionFile implements AutoCloseable {
             if (buf.readBytes(this.channel, (offset >> 8) * SECTOR_BYTES, size) != size) {
                 throw new IllegalStateException("Unable to write all bytes to disk!");
             }
-            this.updateTimestamp(x, z);
+            this.internal_updateTimestamp(x, z);
         } finally {
             this.lock.writeLock().unlock();
             if (release) {
@@ -393,7 +388,7 @@ public class OverclockedRegionFile implements AutoCloseable {
             int offset = this.getOffset(x, z);
             if (offset != 0) {
                 this.setOffset(x, z, 0);
-                this.setTimestamp(x, z, 0);
+                this.internal_setTimestamp(x, z, 0);
                 int start = offset >> 8;
                 int end = start + (offset & 0xFF);
                 this.occupiedSectors.clear(start, end);
@@ -439,14 +434,14 @@ public class OverclockedRegionFile implements AutoCloseable {
         this.lock.readLock().lock();
         try {
             this.assertOpen();
-            return this.index.getInt((x << 2) | (z << 7));
+            return this.index.getInt(getOffsetIndex(x, z));
         } finally {
             this.lock.readLock().unlock();
         }
     }
 
     private void setOffset(int x, int z, int offset) {
-        this.index.putInt((x << 2) | (z << 7), offset);
+        this.index.putInt(getOffsetIndex(x, z), offset);
     }
 
     /**
@@ -461,18 +456,33 @@ public class OverclockedRegionFile implements AutoCloseable {
         this.lock.readLock().lock();
         try {
             this.assertOpen();
-            return this.index.getInt(((x << 2) | (z << 7)) + SECTOR_BYTES);
+            return this.index.getInt(getTimestampIndex(x, z));
         } finally {
             this.lock.readLock().unlock();
         }
     }
 
-    private void updateTimestamp(int x, int z) {
+    public void updateTimestamp(int x, int z) {
         this.setTimestamp(x, z, (int) (System.currentTimeMillis() / 1000L));
     }
 
-    private void setTimestamp(int x, int z, int timestamp) {
-        this.index.putInt(((x << 2) | (z << 7)) + SECTOR_BYTES, timestamp);
+    private void internal_updateTimestamp(int x, int z) {
+        this.internal_setTimestamp(x, z, (int) (System.currentTimeMillis() / 1000L));
+    }
+
+    public void setTimestamp(int x, int z, int timestamp) {
+        assertInBounds(x, z);
+        this.lock.writeLock().lock();
+        try {
+            this.assertOpen();
+            this.internal_setTimestamp(x, z, timestamp);
+        } finally {
+            this.lock.writeLock().unlock();
+        }
+    }
+
+    private void internal_setTimestamp(int x, int z, int timestamp) {
+        this.index.putInt(getTimestampIndex(x, z), timestamp);
     }
 
     private void assertOpen() {

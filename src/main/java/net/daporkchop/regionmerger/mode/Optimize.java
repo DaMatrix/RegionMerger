@@ -23,7 +23,6 @@ import net.daporkchop.lib.common.function.io.IOConsumer;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.regionmerger.World;
 import net.daporkchop.regionmerger.anvil.OverclockedRegionFile;
-import net.daporkchop.regionmerger.mode.Mode;
 import net.daporkchop.regionmerger.option.Arguments;
 import net.daporkchop.regionmerger.option.Option;
 
@@ -39,7 +38,9 @@ import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.Inflater;
 import java.util.zip.InflaterOutputStream;
-import static net.daporkchop.regionmerger.anvil.RegionConstants.*;
+
+import static net.daporkchop.regionmerger.anvil.RegionConstants.ID_DEFLATE;
+import static net.daporkchop.regionmerger.anvil.RegionConstants.SECTOR_BYTES;
 
 /**
  * @author DaPorkchop_
@@ -52,17 +53,18 @@ public class Optimize implements Mode {
 
     @Override
     public void printUsage(@NonNull Logger logger) {
-        logger.info("optimize:")
-              .info("  Optimizes the size of a world by defragmenting and optionally re-compressing the regions.")
-              .info("  This is only useful for worlds that will later be served read-only, as allowing the Minecraft client/server write access to an")
-              .info("  optimized world will cause size to increase again.")
-              .info("")
-              .info("  Usage: optimize [options] <path>")
-              .info("")
-              .info("  Options:")
-              .info("  -c          Enables re-compression of chunks. This will significantly increase the runtime (and CPU usage), but can help decrease")
-              .info("              output size further.")
-              .info("  -l <level>  Sets the level (intensity) of the compression, from 0-8. 0 is the worst, 8 is the best. Only effective with -c. Default: 7");
+        logger.info("  optimize:")
+                .info("    Optimizes the size of a world by defragmenting and optionally re-compressing the regions.")
+                .info("    This is only useful for worlds that will later be served read-only, as allowing the Minecraft client/server write access to an")
+                .info("    optimized world will cause size to increase again.")
+                .info("")
+                .info("    Usage:")
+                .info("      optimize [options] <path>")
+                .info("")
+                .info("    Options:")
+                .info("      -c          Enables re-compression of chunks. This will significantly increase the runtime (and CPU usage), but can help decrease")
+                .info("                  output size further.")
+                .info("      -l <level>  Sets the level (intensity) of the compression, from 0-8. 0 is the worst, 8 is the best. Only effective with -c. Default: 7");
     }
 
     @Override
@@ -92,14 +94,14 @@ public class Optimize implements Mode {
             ThreadLocal<Deflater> deflaterCache = ThreadLocal.withInitial(() -> new Deflater(level));
             recoder = (region, buf, x, z) -> {
                 ByteBuf chunk = region.readDirect(x, z);
-                if (chunk != null)  {
+                if (chunk != null) {
                     try {
                         int oldIndex = buf.writerIndex();
                         buf.writeInt(-1).writeByte(ID_DEFLATE);
-                        if (chunk.readerIndex(4).readByte() != ID_DEFLATE)    {
+                        if (chunk.readerIndex(4).readByte() != ID_DEFLATE) {
                             throw new IllegalStateException("Can't optimize GZIPped chunks!");
                         }
-                        try (OutputStream out = new InflaterOutputStream(new DeflaterOutputStream(NettyUtil.wrapOut(buf), deflaterCache.get()), inflaterCache.get()))   {
+                        try (OutputStream out = new InflaterOutputStream(new DeflaterOutputStream(NettyUtil.wrapOut(buf), deflaterCache.get()), inflaterCache.get())) {
                             chunk.readBytes(out, chunk.readableBytes());
                             if (chunk.isReadable()) {
                                 throw new IllegalStateException("Couldn't copy entire chunk into output buffer!");
@@ -119,7 +121,7 @@ public class Optimize implements Mode {
             //simply copy without anything else
             recoder = (region, buf, x, z) -> {
                 ByteBuf chunk = region.readDirect(x, z);
-                if (chunk != null)  {
+                if (chunk != null) {
                     try {
                         int size = chunk.readableBytes();
                         buf.writeBytes(chunk);
@@ -145,7 +147,7 @@ public class Optimize implements Mode {
                     for (int x = 31; x >= 0; x--) {
                         for (int z = 31; z >= 0; z--) {
                             int cnt = recoder.recode(region, buf, x, z);
-                            if (cnt != -1)  {
+                            if (cnt != -1) {
                                 buf.setInt((x << 2) | (z << 7), cnt | (sector << 8));
                                 sector += cnt;
                                 buf.writerIndex(SECTOR_BYTES * sector);
@@ -178,7 +180,7 @@ public class Optimize implements Mode {
     }
 
     @FunctionalInterface
-    private interface ChunkRecoder  {
+    private interface ChunkRecoder {
         int recode(@NonNull OverclockedRegionFile region, @NonNull ByteBuf buf, int x, int z) throws IOException;
     }
 }

@@ -44,19 +44,17 @@ public class World {
         this.path = path;
         this.readOnly = readOnly;
 
-        if (!path.exists()) {
-            if (readOnly) {
-                throw new IllegalStateException(String.format("World \"%s\" doesn't exist!", path.getAbsolutePath()));
-            }
-            PFiles.ensureDirectoryExists(this.path);
+        if (!path.exists() && readOnly) {
+            throw new IllegalStateException(String.format("World \"%s\" doesn't exist!", path.getAbsolutePath()));
         }
+        PFiles.ensureDirectoryExists(this.path);
         this.regions = Arrays.stream(this.path.listFiles())
-                             .filter(File::isFile)
-                             .map(File::getName)
-                             .map(REGION_PATTERN::matcher)
-                             .filter(Matcher::matches)
-                             .map(m -> new Vec2i(Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2))))
-                             .collect(Collectors.toSet());
+                .filter(File::isFile)
+                .map(File::getName)
+                .map(REGION_PATTERN::matcher)
+                .filter(Matcher::matches)
+                .map(m -> new Vec2i(Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2))))
+                .collect(Collectors.toSet());
     }
 
     public File getAsFile(@NonNull Vec2i regionPos) {
