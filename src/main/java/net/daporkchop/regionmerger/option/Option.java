@@ -23,6 +23,7 @@ import lombok.experimental.Accessors;
 import net.daporkchop.regionmerger.World;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -73,7 +74,7 @@ public interface Option<V> {
             do {
                 sources.add(new World(new File(word), true));
             } while (itr.hasNext() && (word = itr.next()) != null);
-            return sources;
+            return new ArrayList<>(sources);
         }
 
         @Override

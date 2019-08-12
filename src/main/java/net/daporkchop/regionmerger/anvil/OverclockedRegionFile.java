@@ -26,12 +26,7 @@ import net.daporkchop.lib.binary.stream.DataOut;
 import net.daporkchop.lib.common.misc.file.PFiles;
 import net.daporkchop.lib.common.util.PorkUtil;
 import net.daporkchop.lib.encoding.ToBytes;
-import net.daporkchop.lib.encoding.compression.Compression;
 import net.daporkchop.lib.encoding.compression.CompressionHelper;
-import net.daporkchop.lib.primitive.map.ByteObjMap;
-import net.daporkchop.lib.primitive.map.ObjByteMap;
-import net.daporkchop.lib.primitive.map.hash.open.ByteObjOpenHashMap;
-import net.daporkchop.lib.primitive.map.hash.open.ObjByteOpenHashMap;
 
 import java.io.File;
 import java.io.IOException;
@@ -40,11 +35,15 @@ import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.channels.NonWritableChannelException;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+import static net.daporkchop.regionmerger.anvil.RegionConstants.*;
 
 /**
  * A highly optimized rewrite of Mojang's original {@link RegionFile}, designed with backwards-compatibility in mind.
@@ -56,66 +55,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * @see RegionFile for the region spec
  */
 public class OverclockedRegionFile implements AutoCloseable {
-    public static final int LENGTH_HEADER_SIZE  = 4;
-    public static final int VERSION_HEADER_SIZE = 1;
-    public static final int CHUNK_HEADER_SIZE   = LENGTH_HEADER_SIZE + VERSION_HEADER_SIZE;
-    public static final int SECTOR_BYTES        = 4096;
-    public static final int SECTOR_INTS         = SECTOR_BYTES >> 2;
-
-    /**
-     * A bitmask to identify non-official compression versions.
-     * <p>
-     * Any version containing this mask is unofficial, added by me.
-     */
-    public static final byte PORKIAN_ID_MASK = (byte) 0x80;
-
-    public static final byte ID_GZIP    = 1; //official, no longer used by vanilla
-    public static final byte ID_DEFLATE = 2; //official
-    public static final byte ID_NONE    = PORKIAN_ID_MASK | 0;
-    public static final byte ID_BZIP2   = PORKIAN_ID_MASK | 1;
-    public static final byte ID_LZ4     = PORKIAN_ID_MASK | 2;
-    public static final byte ID_LZMA    = PORKIAN_ID_MASK | 3;
-    public static final byte ID_XZ      = PORKIAN_ID_MASK | 4;
-
-    protected static final ByteObjMap<CompressionHelper> COMPRESSION_IDS         = new ByteObjOpenHashMap<>();
-    protected static final ObjByteMap<CompressionHelper> REVERSE_COMPRESSION_IDS = new ObjByteOpenHashMap<>();
-    protected static final byte[]                        EMPTY_SECTOR            = new byte[SECTOR_BYTES];
-
-    protected static final boolean DEBUG_SECTORS = false;
-
-    static {
-        //id => compression algo
-        COMPRESSION_IDS.put(ID_NONE, Compression.NONE);
-        COMPRESSION_IDS.put(ID_GZIP, Compression.GZIP_NORMAL);
-        COMPRESSION_IDS.put(ID_DEFLATE, Compression.DEFLATE_NORMAL);
-        COMPRESSION_IDS.put(ID_BZIP2, Compression.BZIP2_NORMAL);
-        COMPRESSION_IDS.put(ID_LZ4, Compression.LZ4_BLOCK);
-        COMPRESSION_IDS.put(ID_LZMA, Compression.LZMA_NORMAL);
-        COMPRESSION_IDS.put(ID_XZ, Compression.XZ_NORMAL);
-
-        //compression algo => id
-        REVERSE_COMPRESSION_IDS.put(Compression.NONE, ID_NONE);
-        REVERSE_COMPRESSION_IDS.put(Compression.GZIP_LOW, ID_GZIP);
-        REVERSE_COMPRESSION_IDS.put(Compression.GZIP_NORMAL, ID_GZIP);
-        REVERSE_COMPRESSION_IDS.put(Compression.GZIP_HIGH, ID_GZIP);
-        REVERSE_COMPRESSION_IDS.put(Compression.DEFLATE_LOW, ID_DEFLATE);
-        REVERSE_COMPRESSION_IDS.put(Compression.DEFLATE_NORMAL, ID_DEFLATE);
-        REVERSE_COMPRESSION_IDS.put(Compression.DEFLATE_HIGH, ID_DEFLATE);
-        REVERSE_COMPRESSION_IDS.put(Compression.BZIP2_LOW, ID_BZIP2);
-        REVERSE_COMPRESSION_IDS.put(Compression.BZIP2_NORMAL, ID_BZIP2);
-        REVERSE_COMPRESSION_IDS.put(Compression.BZIP2_HIGH, ID_BZIP2);
-        REVERSE_COMPRESSION_IDS.put(Compression.LZ4_BLOCK, ID_LZ4);
-        REVERSE_COMPRESSION_IDS.put(Compression.LZ4_FRAMED_64KB, ID_LZ4);
-        REVERSE_COMPRESSION_IDS.put(Compression.LZ4_FRAMED_256KB, ID_LZ4);
-        REVERSE_COMPRESSION_IDS.put(Compression.LZ4_FRAMED_1MB, ID_LZ4);
-        REVERSE_COMPRESSION_IDS.put(Compression.LZ4_FRAMED_4MB, ID_LZ4);
-        REVERSE_COMPRESSION_IDS.put(Compression.LZMA_LOW, ID_LZMA);
-        REVERSE_COMPRESSION_IDS.put(Compression.LZMA_NORMAL, ID_LZMA);
-        REVERSE_COMPRESSION_IDS.put(Compression.LZMA_HIGH, ID_LZMA);
-        REVERSE_COMPRESSION_IDS.put(Compression.XZ_LOW, ID_XZ);
-        REVERSE_COMPRESSION_IDS.put(Compression.XZ_NORMAL, ID_XZ);
-        REVERSE_COMPRESSION_IDS.put(Compression.XZ_HIGH, ID_XZ);
-    }
+    protected static final OpenOption[] RO_OPEN_OPTIONS = {StandardOpenOption.READ};
+    protected static final OpenOption[] RW_OPEN_OPTIONS = {StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE};
 
     private static void ensureInBounds(int x, int z) {
         if (x < 0 || x >= 32 || z < 0 || z >= 32) {
@@ -143,18 +84,18 @@ public class OverclockedRegionFile implements AutoCloseable {
             Path path = file.toPath();
             FileChannel channel;
             try {
-                if (readOnly)   {
-                    channel = FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.READ);
+                if (readOnly) {
+                    channel = FileChannel.open(path, RO_OPEN_OPTIONS);
                 } else {
-                    channel = FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE);
+                    channel = FileChannel.open(path, RW_OPEN_OPTIONS);
                 }
             } catch (IOException e) {
-                if (readOnly || writeRequired)  {
+                if (readOnly || writeRequired) {
                     throw e;
                 } else {
                     //try opening the file read-only
                     //if this fails, then we don't have any filesystem access and won't be able to do anything about it, so the exception is thrown
-                    channel = FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.READ);
+                    channel = FileChannel.open(path, RO_OPEN_OPTIONS);
                     readOnly = true;
                 }
             }
@@ -166,17 +107,21 @@ public class OverclockedRegionFile implements AutoCloseable {
 
         long fileSize = this.channel.size();
         if (fileSize < SECTOR_BYTES) {
-            //write the chunk offset table
-            this.channel.write(ByteBuffer.wrap(EMPTY_SECTOR), 0L);
-            //write another sector for the timestamp info
-            this.channel.write(ByteBuffer.wrap(EMPTY_SECTOR), SECTOR_BYTES);
-            //fileSize = SECTOR_BYTES << 1;
-        } else if ((fileSize & 0xFFFL) != 0) {
+            try {
+                //write the chunk offset table
+                this.channel.write(ByteBuffer.wrap(EMPTY_SECTOR), 0L);
+                //write another sector for the timestamp info
+                this.channel.write(ByteBuffer.wrap(EMPTY_SECTOR), SECTOR_BYTES);
+                //fileSize = SECTOR_BYTES << 1;
+            } catch (NonWritableChannelException e) {
+                throw new CannotOpenRegionException(String.format("Cannot open read-only region \"%s\" as the headers are not complete", file.getAbsolutePath()));
+            }
+        } else if (!this.readOnly && (fileSize & 0xFFFL) != 0) {
             //the file size is not a multiple of 4KB, grow it
             this.channel.write(ByteBuffer.wrap(EMPTY_SECTOR, 0, (int) (fileSize & 0xFFFL)), fileSize);
         }
 
-        this.index = this.channel.map(this.readOnly ? FileChannel.MapMode.READ_ONLY : FileChannel.MapMode.READ_WRITE, 0, SECTOR_BYTES);
+        this.index = this.channel.map(this.readOnly ? FileChannel.MapMode.READ_ONLY : FileChannel.MapMode.READ_WRITE, 0, SECTOR_BYTES * 2);
 
         this.occupiedSectors.set(0, 2);
         //init occupied sectors bitset
@@ -396,6 +341,7 @@ public class OverclockedRegionFile implements AutoCloseable {
             if (buf.readBytes(this.channel, (offset >> 8) * SECTOR_BYTES, size) != size) {
                 throw new IllegalStateException("Unable to write all bytes to disk!");
             }
+            this.updateTimestamp(x, z);
         } finally {
             this.lock.writeLock().unlock();
             if (release) {
@@ -408,12 +354,24 @@ public class OverclockedRegionFile implements AutoCloseable {
         return this.getOffset(x, z) != 0;
     }
 
-    private int getOffset(int x, int z) {
+    public int getOffset(int x, int z) {
         return this.index.getInt((x << 2) | (z << 7));
     }
 
     private void setOffset(int x, int z, int offset) {
         this.index.putInt((x << 2) | (z << 7), offset);
+    }
+
+    public int getTimestamp(int x, int z) {
+        return this.index.getInt(((x << 2) | (z << 7)) + SECTOR_BYTES);
+    }
+
+    private void updateTimestamp(int x, int z) {
+        this.setTimestamp(x, z, (int) (System.currentTimeMillis() / 1000L));
+    }
+
+    private void setTimestamp(int x, int z, int timestamp) {
+        this.index.putInt(((x << 2) | (z << 7)) + SECTOR_BYTES, timestamp);
     }
 
     private void ensureOpen() {

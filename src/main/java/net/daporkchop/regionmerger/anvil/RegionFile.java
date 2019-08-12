@@ -51,6 +51,8 @@ import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 import java.util.zip.InflaterInputStream;
 
+import static net.daporkchop.regionmerger.anvil.RegionConstants.*;
+
 /**
  * Region File Format
  * <p>
@@ -184,7 +186,7 @@ public class RegionFile implements AutoCloseable {
                 chunkTimestamps[i] = lastModValue;
             }
 
-            if (OverclockedRegionFile.DEBUG_SECTORS) {
+            if (DEBUG_SECTORS) {
                 SparseBitSet bitSet = new SparseBitSet();
                 for (int i = 0; i < this.sectorFree.size(); i++) {
                     if (!this.sectorFree.get(i)) {

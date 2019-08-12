@@ -31,6 +31,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.channels.FileChannel;
+import java.nio.file.OpenOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Collection;
 import java.util.stream.Collectors;
@@ -38,6 +39,7 @@ import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.Inflater;
 import java.util.zip.InflaterOutputStream;
+import static net.daporkchop.regionmerger.anvil.RegionConstants.*;
 
 /**
  * @author DaPorkchop_
@@ -45,6 +47,8 @@ import java.util.zip.InflaterOutputStream;
 public class Optimize implements Mode {
     protected static final Option.Flag RECOMPRESS = Option.flag("c");
     protected static final Option.Int  LEVEL      = Option.integer("l", 7, 0, 8);
+
+    protected static final OpenOption[] OUTPUT_OPEN_OPTIONS = {StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING};
 
     @Override
     public void printUsage(@NonNull Logger logger) {
@@ -91,8 +95,8 @@ public class Optimize implements Mode {
                 if (chunk != null)  {
                     try {
                         int oldIndex = buf.writerIndex();
-                        buf.writeInt(-1).writeByte(OverclockedRegionFile.ID_DEFLATE);
-                        if (chunk.readerIndex(4).readByte() != OverclockedRegionFile.ID_DEFLATE)    {
+                        buf.writeInt(-1).writeByte(ID_DEFLATE);
+                        if (chunk.readerIndex(4).readByte() != ID_DEFLATE)    {
                             throw new IllegalStateException("Can't optimize GZIPped chunks!");
                         }
                         try (OutputStream out = new InflaterOutputStream(new DeflaterOutputStream(NettyUtil.wrapOut(buf), deflaterCache.get()), inflaterCache.get()))   {
@@ -103,7 +107,7 @@ public class Optimize implements Mode {
                         }
                         int size = buf.writerIndex() - oldIndex;
                         buf.setInt(oldIndex, size - 4);
-                        return size / OverclockedRegionFile.SECTOR_BYTES + 1;
+                        return size / SECTOR_BYTES + 1;
                     } finally {
                         chunk.release();
                     }
@@ -122,7 +126,7 @@ public class Optimize implements Mode {
                         if (chunk.isReadable()) {
                             throw new IllegalStateException("Couldn't copy entire chunk into output buffer!");
                         }
-                        return size / OverclockedRegionFile.SECTOR_BYTES + 1;
+                        return size / SECTOR_BYTES + 1;
                     } finally {
                         chunk.release();
                     }
@@ -133,7 +137,7 @@ public class Optimize implements Mode {
         }
 
         regionsAsFiles.parallelStream().forEach((IOConsumer<File>) file -> {
-            ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(OverclockedRegionFile.SECTOR_BYTES * 3).writerIndex(OverclockedRegionFile.SECTOR_BYTES * 2);
+            ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(SECTOR_BYTES * 3).writerIndex(SECTOR_BYTES * 2);
             try {
                 int sector = 2;
                 int chunks = 0;
@@ -144,7 +148,7 @@ public class Optimize implements Mode {
                             if (cnt != -1)  {
                                 buf.setInt((x << 2) | (z << 7), cnt | (sector << 8));
                                 sector += cnt;
-                                buf.writerIndex(OverclockedRegionFile.SECTOR_BYTES * sector);
+                                buf.writerIndex(SECTOR_BYTES * sector);
                                 chunks++;
                             }
                         }
@@ -153,7 +157,7 @@ public class Optimize implements Mode {
                 if (chunks == 0 && !file.delete()) {
                     throw new IllegalStateException(String.format("Couldn't delete file \"%s\"!", file.getAbsolutePath()));
                 } else {
-                    try (FileChannel channel = FileChannel.open(file.toPath(), StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                    try (FileChannel channel = FileChannel.open(file.toPath(), OUTPUT_OPEN_OPTIONS)) {
                         int writeable = buf.readableBytes();
                         int written = buf.readBytes(channel, writeable);
                         if (writeable != written) {

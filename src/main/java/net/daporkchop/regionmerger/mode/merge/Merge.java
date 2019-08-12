@@ -23,6 +23,7 @@ import net.daporkchop.lib.common.function.throwing.ERunnable;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
 import net.daporkchop.regionmerger.World;
+import net.daporkchop.regionmerger.anvil.CannotOpenRegionException;
 import net.daporkchop.regionmerger.anvil.OverclockedRegionFile;
 import net.daporkchop.regionmerger.mode.Mode;
 import net.daporkchop.regionmerger.option.Arguments;
@@ -31,6 +32,7 @@ import net.daporkchop.regionmerger.option.Option;
 import java.io.File;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
+import java.nio.file.OpenOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Collection;
 import java.util.LinkedList;
@@ -38,11 +40,15 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
+import static net.daporkchop.regionmerger.anvil.RegionConstants.*;
+
 /**
  * @author DaPorkchop_
  */
 public class Merge implements Mode {
     protected static final Option.Int PROGRESS_UPDATE_DELAY = Option.integer("p", 5000, 0, Integer.MAX_VALUE);
+
+    protected static final OpenOption[] WRITE_OPEN_OPTIONS = {StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW};
 
     @Override
     public void printUsage(@NonNull Logger logger) {
@@ -71,7 +77,7 @@ public class Merge implements Mode {
         final World dst = args.getDestination();
         final List<World> sources = args.getSources();
 
-        if (!dst.regions().isEmpty())    {
+        if (!dst.regions().isEmpty()) {
             throw new IllegalStateException("Destination has existing regions!");
         }
 
@@ -89,14 +95,14 @@ public class Merge implements Mode {
 
         {
             final int delay = args.get(PROGRESS_UPDATE_DELAY);
-            if (delay > 0)  {
+            if (delay > 0) {
                 Thread t = new Thread((ERunnable) () -> {
                     Logger channel = logger.channel("Progress");
                     int total = regionPositions.size();
-                    while (true)   {
+                    while (true) {
                         Thread.sleep(delay);
                         long remaining = remainingRegions.get();
-                        channel.info("Copied %d/%d regions (%.3f%%, %d chunks)", total - remaining, total, (float) (total - remaining) / (float) total, totalChunks.get());
+                        channel.info("Copied %d/%d regions (%.3f%%, %d chunks)", total - remaining, total, (float) (total - remaining) / (float) total * 100.0f, totalChunks.get());
                         if (remaining == 0) {
                             return;
                         }
@@ -107,25 +113,47 @@ public class Merge implements Mode {
             }
         }
 
+        ThreadLocal<OverclockedRegionFile[]> REGIONS_CACHE = ThreadLocal.withInitial(() -> new OverclockedRegionFile[sources.size()]);
         regionPositions.parallelStream().forEach((IOConsumer<Vec2i>) pos -> {
-            List<OverclockedRegionFile> regions = new LinkedList<>();
+            /*List<OverclockedRegionFile> regions = new LinkedList<>();
             for (int i = 0; i < sources.size(); i++) {
                 World world = sources.get(i);
                 if (world.regions().contains(pos)) {
                     regions.add(new OverclockedRegionFile(world.getAsFile(pos), true, false));
                 }
+            }*/
+            OverclockedRegionFile[] regions = REGIONS_CACHE.get();
+            int regionsCount = 0;
+            for (int i = 0; i < regions.length; i++) {
+                World world = sources.get(i);
+                if (world.regions().contains(pos)) {
+                    OverclockedRegionFile region;
+                    try {
+                        region = new OverclockedRegionFile(world.getAsFile(pos), true, false);
+                    } catch (CannotOpenRegionException e)   {
+                        logger.warn(e);
+                        continue;
+                    }
+                    regions[regionsCount++] = region;
+                }
             }
 
-            ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(OverclockedRegionFile.SECTOR_BYTES * 3).writerIndex(OverclockedRegionFile.SECTOR_BYTES * 2);
+            ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(
+                    SECTOR_BYTES * (2 + 32 * 32),
+                    SECTOR_BYTES * ((32 * 32) * 256 + 2)
+            ).writeBytes(EMPTY_SECTOR).writeBytes(EMPTY_SECTOR);
             try {
                 int sector = 2;
                 int chunks = 0;
                 for (int x = 31; x >= 0; x--) {
                     for (int z = 31; z >= 0; z--) {
                         FIND_REGION_WITH_CHUNK:
-                        for (int i = 0; i < regions.size(); i++)    {
-                            OverclockedRegionFile region = regions.get(i);
-                            if (region.hasChunk(x, z))  {
+                        for (int i = 0; i < regionsCount; i++) {
+                            OverclockedRegionFile region = regions[i];
+                            if (region.hasChunk(x, z)) {
+                                buf.writeBytes(EMPTY_SECTOR, 0, (~buf.capacity() & 0xFFF) + 1); //pad to next sector
+                                //we do this before appending the chunk so that the final chunk in the region doesn't get padded, this does nothing the first time
+
                                 ByteBuf chunk = region.readDirect(x, z);
                                 try {
                                     int cnt = chunk.readableBytes();
@@ -133,10 +161,10 @@ public class Merge implements Mode {
                                     if (chunk.isReadable()) {
                                         throw new IllegalStateException("Couldn't copy entire chunk into output buffer!");
                                     }
-                                    cnt = cnt / OverclockedRegionFile.SECTOR_BYTES + 1;
+                                    cnt = cnt / SECTOR_BYTES + 1;
                                     buf.setInt((x << 2) | (z << 7), cnt | (sector << 8));
+                                    buf.setInt(((x << 2) | (z << 7)) + SECTOR_BYTES, region.getTimestamp(x, z));
                                     sector += cnt;
-                                    buf.writerIndex(OverclockedRegionFile.SECTOR_BYTES * sector);
                                     chunks++;
                                     break FIND_REGION_WITH_CHUNK;
                                 } finally {
@@ -147,19 +175,24 @@ public class Merge implements Mode {
                     }
                 }
                 if (chunks > 0) {
-                    try (FileChannel channel = FileChannel.open(dst.getAsFile(pos).toPath(), StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE)) {
+                    try (FileChannel channel = FileChannel.open(dst.getAsFile(pos).toPath(), WRITE_OPEN_OPTIONS)) {
                         int writeable = buf.readableBytes();
                         int written = buf.readBytes(channel, writeable);
                         if (writeable != written) {
                             throw new IllegalStateException(String.format("Only wrote %d/%d bytes!", written, writeable));
                         }
                     }
-                    remainingRegions.getAndDecrement();
                     totalChunks.getAndAdd(chunks);
+                } else {
+                    logger.warn("Found no input chunks for region (%d,%d)", pos.getX(), pos.getY());
                 }
+                remainingRegions.getAndDecrement();
             } finally {
                 buf.release();
-                regions.forEach((IOConsumer<OverclockedRegionFile>) OverclockedRegionFile::close);
+                for (int i = regionsCount - 1; i >= 0; i--) {
+                    regions[i].close();
+                    regions[i] = null;
+                }
             }
         });
 
