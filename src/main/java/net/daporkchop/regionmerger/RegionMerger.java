@@ -18,9 +18,9 @@ package net.daporkchop.regionmerger;
 import net.daporkchop.lib.logging.LogAmount;
 import net.daporkchop.lib.logging.Logging;
 import net.daporkchop.regionmerger.mode.Mode;
-import net.daporkchop.regionmerger.mode.findmissing.FindMissing;
-import net.daporkchop.regionmerger.mode.merge.Merge;
-import net.daporkchop.regionmerger.mode.optimize.Optimize;
+import net.daporkchop.regionmerger.mode.FindMissing;
+import net.daporkchop.regionmerger.mode.Merge;
+import net.daporkchop.regionmerger.mode.Optimize;
 import net.daporkchop.regionmerger.option.Arguments;
 
 import java.io.File;

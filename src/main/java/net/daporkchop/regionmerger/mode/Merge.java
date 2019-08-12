@@ -13,7 +13,7 @@
  *
  */
 
-package net.daporkchop.regionmerger.mode.merge;
+package net.daporkchop.regionmerger.mode;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.PooledByteBufAllocator;
@@ -23,9 +23,8 @@ import net.daporkchop.lib.common.function.throwing.ERunnable;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
 import net.daporkchop.regionmerger.World;
-import net.daporkchop.regionmerger.anvil.CannotOpenRegionException;
+import net.daporkchop.regionmerger.anvil.ex.CannotOpenRegionException;
 import net.daporkchop.regionmerger.anvil.OverclockedRegionFile;
-import net.daporkchop.regionmerger.mode.Mode;
 import net.daporkchop.regionmerger.option.Arguments;
 import net.daporkchop.regionmerger.option.Option;
 
@@ -35,7 +34,6 @@ import java.nio.channels.FileChannel;
 import java.nio.file.OpenOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Collection;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;

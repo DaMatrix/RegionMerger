@@ -13,11 +13,13 @@
  *
  */
 
-package net.daporkchop.regionmerger.anvil;
+package net.daporkchop.regionmerger.anvil.ex;
 
 import java.io.IOException;
 
 /**
+ * Thrown when a region file could not be opened.
+ *
  * @author DaPorkchop_
  */
 public class CannotOpenRegionException extends IOException {

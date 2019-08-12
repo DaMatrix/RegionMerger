@@ -21,12 +21,14 @@ import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import lombok.Getter;
 import lombok.NonNull;
+import lombok.experimental.Accessors;
 import net.daporkchop.lib.binary.netty.NettyUtil;
 import net.daporkchop.lib.binary.stream.DataOut;
 import net.daporkchop.lib.common.misc.file.PFiles;
-import net.daporkchop.lib.common.util.PorkUtil;
 import net.daporkchop.lib.encoding.ToBytes;
 import net.daporkchop.lib.encoding.compression.CompressionHelper;
+import net.daporkchop.regionmerger.anvil.ex.CannotOpenRegionException;
+import net.daporkchop.regionmerger.anvil.ex.ReadOnlyRegionException;
 
 import java.io.File;
 import java.io.IOException;
@@ -54,18 +56,19 @@ import static net.daporkchop.regionmerger.anvil.RegionConstants.*;
  * @author DaPorkchop_
  * @see RegionFile for the region spec
  */
+@Accessors(fluent = true)
 public class OverclockedRegionFile implements AutoCloseable {
     protected static final OpenOption[] RO_OPEN_OPTIONS = {StandardOpenOption.READ};
     protected static final OpenOption[] RW_OPEN_OPTIONS = {StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE};
 
-    private static void ensureInBounds(int x, int z) {
+    private static void assertInBounds(int x, int z) {
         if (x < 0 || x >= 32 || z < 0 || z >= 32) {
             throw new IllegalArgumentException(String.format("Coordinates out of bounds: (%d,%d)", x, z));
         }
     }
 
     @Getter
-    protected final long             lastModified;
+    protected final String           absolutePath;
     protected final FileChannel      channel;
     protected final MappedByteBuffer index;
     protected final SparseBitSet  occupiedSectors = new SparseBitSet();
@@ -102,7 +105,6 @@ public class OverclockedRegionFile implements AutoCloseable {
 
             this.channel = channel;
             this.readOnly = readOnly;
-            this.lastModified = file.lastModified();
         }
 
         long fileSize = this.channel.size();
@@ -131,6 +133,7 @@ public class OverclockedRegionFile implements AutoCloseable {
                 this.occupiedSectors.set(offset >> 8, (offset >> 8) + (offset & 0xFF));
             }
         }
+        this.absolutePath = file.getAbsolutePath();
 
         if (DEBUG_SECTORS) {
             System.out.println(this.occupiedSectors);
@@ -170,11 +173,11 @@ public class OverclockedRegionFile implements AutoCloseable {
      * @throws IOException if an IO exception occurs you dummy
      */
     public ByteBuf readDirect(int x, int z) throws IOException {
-        ensureInBounds(x, z);
+        assertInBounds(x, z);
 
         this.lock.readLock().lock();
         try {
-            this.ensureOpen();
+            this.assertOpen();
 
             int offset = this.getOffset(x, z);
             if (offset == 0) {
@@ -201,9 +204,10 @@ public class OverclockedRegionFile implements AutoCloseable {
      * @param z           the chunk's Z coordinate
      * @param compression the type of compression to use
      * @return a {@link DataOut} for writing data to the given chunk
-     * @throws IOException if an IO exception occurs you dummy
+     * @throws ReadOnlyRegionException if the region is opened in read-only mode
+     * @throws IOException             if an IO exception occurs you dummy
      */
-    public DataOut write(int x, int z, @NonNull CompressionHelper compression) throws IOException {
+    public DataOut write(int x, int z, @NonNull CompressionHelper compression) throws ReadOnlyRegionException, IOException {
         byte compressionId = REVERSE_COMPRESSION_IDS.get(compression);
         if (compressionId == -1) {
             throw new IllegalArgumentException(String.format("Unregistered compression format: %s", compression));
@@ -221,10 +225,12 @@ public class OverclockedRegionFile implements AutoCloseable {
      * @param compression   the type of compression to use
      * @param compressionId the compression's ID, for writing to disk for decompression
      * @return a {@link DataOut} for writing data to the given chunk
-     * @throws IOException if an IO exception occurs you dummy
+     * @throws ReadOnlyRegionException if the region is opened in read-only mode
+     * @throws IOException             if an IO exception occurs you dummy
      */
-    public DataOut write(int x, int z, @NonNull CompressionHelper compression, byte compressionId) throws IOException {
-        ensureInBounds(x, z);
+    public DataOut write(int x, int z, @NonNull CompressionHelper compression, byte compressionId) throws ReadOnlyRegionException, IOException {
+        assertInBounds(x, z);
+        this.assertWritable();
         if (this.readOnly) {
             throw new IllegalStateException("File is opened read-only!");
         } else {
@@ -260,10 +266,11 @@ public class OverclockedRegionFile implements AutoCloseable {
      * @param x the chunk's X coordinate
      * @param z the chunk's Z coordinate
      * @param b a {@code byte[]} containing the raw chunk data. Must be prefixed with the compression version
-     * @throws IOException if an IO exception occurs you dummy
+     * @throws ReadOnlyRegionException if the region is opened in read-only mode
+     * @throws IOException             if an IO exception occurs you dummy
      */
-    public void writeDirect(int x, int z, @NonNull byte[] b) throws IOException {
-        ensureInBounds(x, z);
+    public void writeDirect(int x, int z, @NonNull byte[] b) throws ReadOnlyRegionException, IOException {
+        assertInBounds(x, z);
         if (this.readOnly) {
             throw new IllegalStateException("File is opened read-only!");
         } else {
@@ -278,10 +285,11 @@ public class OverclockedRegionFile implements AutoCloseable {
      * @param z   the chunk's Z coordinate
      * @param buf a {@link ByteBuf} containing the raw chunk data. Must be prefixed with the compression version and length. This will be released after
      *            invoking this method
-     * @throws IOException if an IO exception occurs you dummy
+     * @throws ReadOnlyRegionException if the region is opened in read-only mode
+     * @throws IOException             if an IO exception occurs you dummy
      */
-    public void writeDirect(int x, int z, @NonNull ByteBuf buf) throws IOException {
-        ensureInBounds(x, z);
+    public void writeDirect(int x, int z, @NonNull ByteBuf buf) throws ReadOnlyRegionException, IOException {
+        assertInBounds(x, z);
         if (this.readOnly) {
             throw new IllegalStateException("File is opened read-only!");
         } else {
@@ -296,12 +304,14 @@ public class OverclockedRegionFile implements AutoCloseable {
      * @param z       the chunk's Z coordinate
      * @param buf     a {@link ByteBuf} containing the raw chunk data. Must be prefixed with the compression version and length
      * @param release whether or not to release the buffer after writing
-     * @throws IOException if an IO exception occurs you dummy
+     * @throws ReadOnlyRegionException if the region is opened in read-only mode
+     * @throws IOException             if an IO exception occurs you dummy
      */
-    private void doWrite(int x, int z, @NonNull ByteBuf buf, boolean release) throws IOException {
+    private void doWrite(int x, int z, @NonNull ByteBuf buf, boolean release) throws ReadOnlyRegionException, IOException {
+        this.assertWritable();
         this.lock.writeLock().lock();
         try {
-            this.ensureOpen();
+            this.assertOpen();
 
             int size = buf.readableBytes();
             if (size < CHUNK_HEADER_SIZE || buf.readableBytes() > (1 << 20)) {
@@ -350,20 +360,111 @@ public class OverclockedRegionFile implements AutoCloseable {
         }
     }
 
+    /**
+     * Deletes the chunk from the region at the given region-local coordinates, overwriting sectors previously occupied by the chunk with zeroes.
+     *
+     * @param x the chunk's X coordinate
+     * @param z the chunk's Z coordinate
+     * @return whether or not the chunk was removed. If {@code false}, the chunk was not present
+     * @throws ReadOnlyRegionException if the region is opened in read-only mode
+     * @throws IOException             if an IO exception occurs you dummy
+     */
+    public boolean delete(int x, int z) throws ReadOnlyRegionException, IOException {
+        return this.delete(x, z, true);
+    }
+
+    /**
+     * Deletes the chunk from the region at the given region-local coordinates.
+     *
+     * @param x     the chunk's X coordinate
+     * @param z     the chunk's Z coordinate
+     * @param erase whether or not to erase the sectors previously occupied by the chunk (i.e. overwrite them with zeroes)
+     * @return whether or not the chunk was removed. If {@code false}, the chunk was not present
+     * @throws ReadOnlyRegionException if the region is opened in read-only mode
+     * @throws IOException             if an IO exception occurs you dummy
+     */
+    public boolean delete(int x, int z, boolean erase) throws ReadOnlyRegionException, IOException {
+        assertInBounds(x, z);
+        this.lock.writeLock().lock();
+        try {
+            this.assertOpen();
+            this.assertWritable();
+
+            int offset = this.getOffset(x, z);
+            if (offset != 0) {
+                this.setOffset(x, z, 0);
+                this.setTimestamp(x, z, 0);
+                int start = offset >> 8;
+                int end = start + (offset & 0xFF);
+                this.occupiedSectors.clear(start, end);
+                if (erase) {
+                    ByteBuffer empty = ByteBuffer.wrap(EMPTY_SECTOR);
+                    for (; start < end; start++) {
+                        empty.clear();
+                        int i = this.channel.write(empty, start * (long) SECTOR_BYTES);
+                        if (i != SECTOR_BYTES) {
+                            throw new IllegalStateException(String.format("Only wrote %d/%d bytes!", i, SECTOR_BYTES));
+                        }
+                    }
+                }
+                return true;
+            } else {
+                return false;
+            }
+        } finally {
+            this.lock.writeLock().unlock();
+        }
+    }
+
+    /**
+     * Checks whether or not the chunk at the given region-local coordinates is present in the region.
+     *
+     * @param x the chunk's X coordinate
+     * @param z the chunk's Z coordinate
+     * @return whether or not the chunk is present
+     */
     public boolean hasChunk(int x, int z) {
         return this.getOffset(x, z) != 0;
     }
 
+    /**
+     * Gets the encoded offset value for the chunk at the given region-local coordinates.
+     *
+     * @param x the chunk's X coordinate
+     * @param z the chunk's Z coordinate
+     * @return the chunk's offset value
+     */
     public int getOffset(int x, int z) {
-        return this.index.getInt((x << 2) | (z << 7));
+        assertInBounds(x, z);
+        this.lock.readLock().lock();
+        try {
+            this.assertOpen();
+            return this.index.getInt((x << 2) | (z << 7));
+        } finally {
+            this.lock.readLock().unlock();
+        }
     }
 
     private void setOffset(int x, int z, int offset) {
         this.index.putInt((x << 2) | (z << 7), offset);
     }
 
+    /**
+     * Gets the last modified timestamp for the chunk at the given region-local coordinates.
+     *
+     * @param x the chunk's X coordinate
+     * @param z the chunk's Z coordinate
+     * @return the chunk's last modified timestamp
+     */
     public int getTimestamp(int x, int z) {
-        return this.index.getInt(((x << 2) | (z << 7)) + SECTOR_BYTES);
+        assertInBounds(x, z);
+        this.lock.readLock().lock();
+        try {
+            this.assertOpen();
+            return this.index.getInt(((x << 2) | (z << 7)) + SECTOR_BYTES);
+        } finally {
+            this.lock.readLock().unlock();
+        }
     }
 
     private void updateTimestamp(int x, int z) {
@@ -374,9 +475,21 @@ public class OverclockedRegionFile implements AutoCloseable {
         this.index.putInt(((x << 2) | (z << 7)) + SECTOR_BYTES, timestamp);
     }
 
-    private void ensureOpen() {
+    private void assertOpen() {
         if (!this.open.get()) {
             throw new IllegalStateException("Closed!");
+        }
+    }
+
+    private void assertWritable() throws ReadOnlyRegionException {
+        if (this.readOnly) {
+            throw new ReadOnlyRegionException(this);
+        }
+    }
+
+    private void assertWritable(String msg) throws ReadOnlyRegionException {
+        if (this.readOnly) {
+            throw new ReadOnlyRegionException(this, msg);
         }
     }
 
@@ -388,7 +501,8 @@ public class OverclockedRegionFile implements AutoCloseable {
                 if (!this.readOnly) {
                     this.index.force();
                 }
-                PorkUtil.release(this.index);
+                //i don't think that this actually helps anything
+                //PorkUtil.release(this.index);
                 this.channel.close();
             }
         } finally {

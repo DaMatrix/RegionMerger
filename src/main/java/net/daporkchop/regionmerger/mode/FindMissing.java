@@ -13,7 +13,7 @@
  *
  */
 
-package net.daporkchop.regionmerger.mode.findmissing;
+package net.daporkchop.regionmerger.mode;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.PooledByteBufAllocator;
