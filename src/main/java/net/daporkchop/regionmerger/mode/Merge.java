@@ -113,7 +113,7 @@ public class Merge implements Mode {
         }
 
         ThreadLocal<ByteBuf[]> REGIONS_CACHE = ThreadLocal.withInitial(() -> new ByteBuf[sources.size()]);
-        regionPositions.stream().forEach((IOConsumer<Vec2i>) pos -> {
+        regionPositions.parallelStream().forEach((IOConsumer<Vec2i>) pos -> {
             /*List<OverclockedRegionFile> regions = new LinkedList<>();
             for (int i = 0; i < sources.size(); i++) {
                 World world = sources.get(i);
@@ -164,22 +164,21 @@ public class Merge implements Mode {
                         int offset = getOffsetIndex(x, z);
                         for (int i = 0; i < regionsCount; i++) {
                             ByteBuf region = regions[i];
-                            if (region.getInt(offset) != 0) {
-                                offset = (region.getInt(offset) >> 8) * SECTOR_BYTES;
-                                //int chunkOffset = region.getInt(offset);
-                                //int chunkPos = (chunkOffset >> 8) * SECTOR_BYTES;
-                                int cnt = region.getInt(offset);
+                            int chunkOffset = region.getInt(offset);
+                            if (chunkOffset != 0) {
+                                int chunkPos = (chunkOffset >> 8) * SECTOR_BYTES;
+                                //int chunkSectors = chunkOffset & 0xFF;
 
-                                buf.setInt(getOffsetIndex(x, z), (cnt / SECTOR_BYTES + 1) | (((buf.writerIndex()) / SECTOR_BYTES) << 8));
-                                buf.setInt(getOffsetIndex(x, z) + SECTOR_BYTES, region.getInt(getOffsetIndex(x, z) + SECTOR_BYTES));
+                                int sizeBytes = region.getInt(chunkPos);
 
-                                buf.writeBytes(region, offset, cnt + LENGTH_HEADER_SIZE);
+                                buf.writeBytes(region, chunkPos, sizeBytes + LENGTH_HEADER_SIZE);
                                 buf.writeBytes(EMPTY_SECTOR, 0, ((buf.writerIndex() - 1 >> 12) + 1 << 12) - buf.writerIndex()); //pad to next sector
 
-                                cnt = cnt / SECTOR_BYTES + 1;
-                                //buf.setInt(offset = getOffsetIndex(x, z), cnt | (((buf.writerIndex()) / SECTOR_BYTES - 1) << 8));
-                                //buf.setInt(offset + SECTOR_BYTES, region.getInt(offset + SECTOR_BYTES));
-                                //sector += cnt;
+                                int chunkSectors = buf.writerIndex() >> 12;
+
+                                buf.setInt(offset, (chunkSectors - sector) | (sector << 8));
+                                buf.setInt(offset + SECTOR_BYTES, region.getInt(offset + SECTOR_BYTES));
+                                sector = chunkSectors;
                                 chunks++;
                                 break;
                             }
