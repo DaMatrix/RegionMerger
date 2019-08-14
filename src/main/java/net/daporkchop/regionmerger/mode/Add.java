@@ -69,7 +69,7 @@ public class Add implements Mode {
 
     @Override
     public Arguments arguments() {
-        return new Arguments(true, true, KEEP_EXISTING, PROGRESS_UPDATE_DELAY);
+        return new Arguments(true, true, KEEP_EXISTING, TURBO, PROGRESS_UPDATE_DELAY);
     }
 
     @Override
@@ -85,7 +85,7 @@ public class Add implements Mode {
         final boolean keepExisting = args.get(KEEP_EXISTING);
         final boolean turbo = args.get(TURBO);
 
-        if (turbo && keepExisting)  {
+        if (turbo && keepExisting) {
             logger.error("-t and -k are not compatible!");
             System.exit(1);
         }
@@ -122,14 +122,14 @@ public class Add implements Mode {
             }
         }
 
-        if (args.get(TURBO))    {
+        if (args.get(TURBO)) {
             ThreadLocal<OverclockedRegionFile[]> REGIONS_CACHE = ThreadLocal.withInitial(() -> new OverclockedRegionFile[sources.size() + 1]);
             regionPositions.parallelStream()
                     .forEach((IOConsumer<Vec2i>) pos -> {
                         File dstFile = dst.getAsFile(pos);
                         OverclockedRegionFile[] regions = REGIONS_CACHE.get();
                         int regionsCount;
-                        if (dst.regions().contains(pos))    {
+                        if (dst.regions().contains(pos)) {
                             regionsCount = 1;
                             regions[0] = new OverclockedRegionFile(dstFile, true, false);
                         } else {
@@ -161,7 +161,7 @@ public class Add implements Mode {
                                     for (int i = 0; i < regionsCount; i++) {
                                         OverclockedRegionFile region = regions[i];
                                         if (region.hasChunk(x, z)) {
-                                            buf.writeBytes(EMPTY_SECTOR, 0, (~buf.capacity() & 0xFFF) + 1); //pad to next sector
+                                            buf.writeBytes(EMPTY_SECTOR, 0, ((buf.writerIndex() - 1 >> 12) + 1 << 12) - buf.writerIndex()); //pad to next sector
                                             //we do this before appending the chunk so that the final chunk in the region doesn't get padded, this does nothing the first time
 
                                             ByteBuf chunk = region.readDirect(x, z);

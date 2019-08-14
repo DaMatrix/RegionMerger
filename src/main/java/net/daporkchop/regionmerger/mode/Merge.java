@@ -114,7 +114,7 @@ public class Merge implements Mode {
         }
 
         ThreadLocal<OverclockedRegionFile[]> REGIONS_CACHE = ThreadLocal.withInitial(() -> new OverclockedRegionFile[sources.size()]);
-        regionPositions.parallelStream().forEach((IOConsumer<Vec2i>) pos -> {
+        regionPositions.stream().forEach((IOConsumer<Vec2i>) pos -> {
             /*List<OverclockedRegionFile> regions = new LinkedList<>();
             for (int i = 0; i < sources.size(); i++) {
                 World world = sources.get(i);
@@ -150,7 +150,7 @@ public class Merge implements Mode {
                         for (int i = 0; i < regionsCount; i++) {
                             OverclockedRegionFile region = regions[i];
                             if (region.hasChunk(x, z)) {
-                                buf.writeBytes(EMPTY_SECTOR, 0, (~buf.capacity() & 0xFFF) + 1); //pad to next sector
+                                buf.writeBytes(EMPTY_SECTOR, 0, ((buf.writerIndex() - 1 >> 12) + 1 << 12) - buf.writerIndex()); //pad to next sector
                                 //we do this before appending the chunk so that the final chunk in the region doesn't get padded, this does nothing the first time
 
                                 ByteBuf chunk = region.readDirect(x, z);
