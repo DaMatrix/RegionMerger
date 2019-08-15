@@ -23,8 +23,6 @@ import net.daporkchop.lib.common.function.throwing.ERunnable;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
 import net.daporkchop.regionmerger.World;
-import net.daporkchop.regionmerger.anvil.OverclockedRegionFile;
-import net.daporkchop.regionmerger.anvil.ex.CannotOpenRegionException;
 import net.daporkchop.regionmerger.option.Arguments;
 import net.daporkchop.regionmerger.option.Option;
 
@@ -45,9 +43,9 @@ import static net.daporkchop.regionmerger.anvil.RegionConstants.*;
  */
 public class Add implements Mode {
     protected static final Option.Flag KEEP_EXISTING         = Option.flag("k");
-    protected static final Option.Flag TURBO                 = Option.flag("t");
     protected static final Option.Int  PROGRESS_UPDATE_DELAY = Option.integer("p", 5000, 0, Integer.MAX_VALUE);
 
+    protected static final OpenOption[] READ_OPEN_OPTIONS  = {StandardOpenOption.READ};
     protected static final OpenOption[] WRITE_OPEN_OPTIONS = {StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING};
 
     @Override
@@ -69,7 +67,7 @@ public class Add implements Mode {
 
     @Override
     public Arguments arguments() {
-        return new Arguments(true, true, KEEP_EXISTING, TURBO, PROGRESS_UPDATE_DELAY);
+        return new Arguments(true, true, KEEP_EXISTING, PROGRESS_UPDATE_DELAY);
     }
 
     @Override
@@ -83,10 +81,9 @@ public class Add implements Mode {
         final List<World> sources = args.getSources();
 
         final boolean keepExisting = args.get(KEEP_EXISTING);
-        final boolean turbo = args.get(TURBO);
 
-        if (turbo && keepExisting) {
-            logger.error("-t and -k are not compatible!");
+        if (keepExisting) {
+            logger.error("-k is not currently implemented!");
             System.exit(1);
         }
 
@@ -122,150 +119,121 @@ public class Add implements Mode {
             }
         }
 
-        if (args.get(TURBO)) {
-            ThreadLocal<OverclockedRegionFile[]> REGIONS_CACHE = ThreadLocal.withInitial(() -> new OverclockedRegionFile[sources.size() + 1]);
-            regionPositions.parallelStream()
-                    .forEach((IOConsumer<Vec2i>) pos -> {
-                        File dstFile = dst.getAsFile(pos);
-                        OverclockedRegionFile[] regions = REGIONS_CACHE.get();
-                        int regionsCount;
-                        if (dst.regions().contains(pos)) {
-                            regionsCount = 1;
-                            regions[0] = new OverclockedRegionFile(dstFile, true, false);
-                        } else {
-                            regionsCount = 0;
-                        }
-                        for (int i = 0; i < regions.length; i++) {
-                            World world = sources.get(i);
-                            if (world.regions().contains(pos)) {
-                                OverclockedRegionFile region;
-                                try {
-                                    region = new OverclockedRegionFile(world.getAsFile(pos), true, false);
-                                } catch (CannotOpenRegionException e) {
-                                    logger.warn(e);
-                                    continue;
-                                }
-                                regions[regionsCount++] = region;
+        ThreadLocal<ByteBuf[]> REGIONS_CACHE = ThreadLocal.withInitial(() -> new ByteBuf[sources.size() + 1]);
+        regionPositions.parallelStream()
+                .forEach((IOConsumer<Vec2i>) pos -> {
+                    File dstFile = dst.getAsFile(pos);
+                    ByteBuf[] regions = REGIONS_CACHE.get();
+                    int regionsCount = 0;
+                    BASE:
+                    if (dst.regions().contains(pos)) {
+                        ByteBuf buf = null;
+                        try (FileChannel channel = FileChannel.open(dstFile.toPath(), READ_OPEN_OPTIONS)) {
+                            long size = channel.size();
+                            if (size > Integer.MAX_VALUE) {
+                                throw new IllegalStateException(String.format("Region too big: %s (%d bytes)", dst.getAsFile(pos).getAbsolutePath(), size));
                             }
-                        }
-
-                        int chunks = 0;
-                        ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(
-                                SECTOR_BYTES * (2 + 32 * 32),
-                                SECTOR_BYTES * ((32 * 32) * 256 + 2)
-                        ).writeBytes(EMPTY_SECTOR).writeBytes(EMPTY_SECTOR);
-                        try {
-                            int sector = 2;
-                            for (int x = 31; x >= 0; x--) {
-                                for (int z = 31; z >= 0; z--) {
-                                    for (int i = 0; i < regionsCount; i++) {
-                                        OverclockedRegionFile region = regions[i];
-                                        if (region.hasChunk(x, z)) {
-                                            buf.writeBytes(EMPTY_SECTOR, 0, ((buf.writerIndex() - 1 >> 12) + 1 << 12) - buf.writerIndex()); //pad to next sector
-                                            //we do this before appending the chunk so that the final chunk in the region doesn't get padded, this does nothing the first time
-
-                                            ByteBuf chunk = region.readDirect(x, z);
-                                            try {
-                                                int cnt = chunk.readableBytes();
-                                                buf.writeBytes(chunk);
-                                                if (chunk.isReadable()) {
-                                                    throw new IllegalStateException("Couldn't copy entire chunk into output buffer!");
-                                                }
-                                                cnt = cnt / SECTOR_BYTES + 1;
-                                                buf.setInt(getOffsetIndex(x, z), cnt | (sector << 8));
-                                                buf.setInt(getTimestampIndex(x, z), region.getTimestamp(x, z));
-                                                sector += cnt;
-                                                chunks++;
-                                                break;
-                                            } finally {
-                                                chunk.release();
-                                            }
-                                        }
-                                    }
-                                }
+                            buf = PooledByteBufAllocator.DEFAULT.ioBuffer((int) size);
+                            int cnt = buf.writeBytes(channel, (int) size);
+                            if (cnt != size || buf.writerIndex() != size) {
+                                throw new IllegalStateException(String.format("Only read %d (%d)/%d bytes!", cnt, buf.writerIndex(), size));
                             }
-                        } finally {
-                            buf.release();
-                            while (--regionsCount >= 0) {
-                                regions[regionsCount].close();
-                                regions[regionsCount] = null;
+                        } catch (Exception e) {
+                            logger.warn(e);
+                            if (buf != null) {
+                                buf.release();
                             }
-                        }
-                        if (chunks > 0) {
-                            try (FileChannel channel = FileChannel.open(dstFile.toPath(), WRITE_OPEN_OPTIONS)) {
-                                int writeable = buf.readableBytes();
-                                int written = buf.readBytes(channel, writeable);
-                                if (writeable != written) {
-                                    throw new IllegalStateException(String.format("Only wrote %d/%d bytes!", written, writeable));
-                                }
-                            }
-                            totalChunks.getAndAdd(chunks);
-                        } else {
-                            logger.warn("Found no input chunks for region (%d,%d)", pos.getX(), pos.getY());
-                        }
-                        remainingRegions.getAndDecrement();
-                    });
-        } else {
-            ThreadLocal<OverclockedRegionFile[]> REGIONS_CACHE = ThreadLocal.withInitial(() -> new OverclockedRegionFile[sources.size()]);
-            regionPositions.parallelStream()
-                    .forEach((IOConsumer<Vec2i>) pos -> {
-                        OverclockedRegionFile[] regions = REGIONS_CACHE.get();
-                        int regionsCount = 0;
-                        for (int i = 0; i < regions.length; i++) {
-                            World world = sources.get(i);
-                            if (world.regions().contains(pos)) {
-                                OverclockedRegionFile region;
-                                try {
-                                    region = new OverclockedRegionFile(world.getAsFile(pos), true, false);
-                                } catch (CannotOpenRegionException e) {
-                                    logger.warn(e);
-                                    continue;
-                                }
-                                regions[regionsCount++] = region;
-                            }
-                        }
-
-                        try (OverclockedRegionFile dstRegion = new OverclockedRegionFile(dst.getAsFile(pos), false, true)) {
-                            int chunks = 0;
-                            if (keepExisting) {
-                                for (int x = 31; x >= 0; x--) {
-                                    for (int z = 31; z >= 0; z--) {
-                                        if (!dstRegion.hasChunk(x, z)) { //only copy if destination region doesn't have the chunk
-                                            for (int i = 0; i < regionsCount; i++) { //search for input region containing the chunk
-                                                if (regions[i].hasChunk(x, z)) {
-                                                    dstRegion.writeDirect(x, z, regions[i].readDirect(x, z));
-                                                    dstRegion.setTimestamp(x, z, regions[i].getTimestamp(x, z));
-                                                    chunks++;
-                                                    break; //chunk has been found, continue to next one
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                            if (e instanceof RuntimeException) {
+                                throw e;
                             } else {
-                                for (int x = 31; x >= 0; x--) {
-                                    for (int z = 31; z >= 0; z--) {
-                                        for (int i = 0; i < regionsCount; i++) { //search for input region containing the chunk
-                                            if (regions[i].hasChunk(x, z)) {
-                                                dstRegion.writeDirect(x, z, regions[i].readDirect(x, z));
-                                                dstRegion.setTimestamp(x, z, regions[i].getTimestamp(x, z));
-                                                chunks++;
-                                                break; //chunk has been found, continue to next one
-                                            }
-                                        }
+                                break BASE;
+                            }
+                        }
+                        regions[regionsCount++] = buf;
+                    }
+                    for (int i = 0; i < regions.length; i++) {
+                        World world = sources.get(i);
+                        if (world.regions().contains(pos)) {
+                            ByteBuf buf = null;
+                            try (FileChannel channel = FileChannel.open(world.getAsFile(pos).toPath(), READ_OPEN_OPTIONS)) {
+                                long size = channel.size();
+                                if (size > Integer.MAX_VALUE) {
+                                    throw new IllegalStateException(String.format("Region too big: %s (%d bytes)", world.getAsFile(pos).getAbsolutePath(), size));
+                                }
+                                buf = PooledByteBufAllocator.DEFAULT.ioBuffer((int) size);
+                                int cnt = buf.writeBytes(channel, (int) size);
+                                if (cnt != size || buf.writerIndex() != size) {
+                                    throw new IllegalStateException(String.format("Only read %d (%d)/%d bytes!", cnt, buf.writerIndex(), size));
+                                }
+                            } catch (Exception e) {
+                                logger.warn(e);
+                                if (buf != null) {
+                                    buf.release();
+                                }
+                                if (e instanceof RuntimeException) {
+                                    throw e;
+                                } else {
+                                    continue;
+                                }
+                            }
+                            regions[regionsCount++] = buf;
+                        }
+                    }
+
+                    int chunks = 0;
+                    ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(
+                            SECTOR_BYTES * (2 + 32 * 32),
+                            SECTOR_BYTES * ((32 * 32) * 256 + 2)
+                    ).writeBytes(EMPTY_SECTOR).writeBytes(EMPTY_SECTOR);
+                    try {
+                        int sector = 2;
+                        for (int x = 31; x >= 0; x--) {
+                            for (int z = 31; z >= 0; z--) {
+                                int offset = getOffsetIndex(x, z);
+                                for (int i = 0; i < regionsCount; i++) {
+                                    ByteBuf region = regions[i];
+                                    int chunkOffset = region.getInt(offset);
+                                    if (chunkOffset != 0) {
+                                        int chunkPos = (chunkOffset >> 8) * SECTOR_BYTES;
+                                        //int chunkSectors = chunkOffset & 0xFF;
+
+                                        int sizeBytes = region.getInt(chunkPos);
+
+                                        buf.writeBytes(region, chunkPos, sizeBytes + LENGTH_HEADER_SIZE);
+                                        buf.writeBytes(EMPTY_SECTOR, 0, ((buf.writerIndex() - 1 >> 12) + 1 << 12) - buf.writerIndex()); //pad to next sector
+
+                                        int chunkSectors = buf.writerIndex() >> 12;
+
+                                        buf.setInt(offset, (chunkSectors - sector) | (sector << 8));
+                                        buf.setInt(offset + SECTOR_BYTES, region.getInt(offset + SECTOR_BYTES));
+                                        sector = chunkSectors;
+                                        chunks++;
+                                        break;
                                     }
                                 }
                             }
-                            totalChunks.getAndAdd(chunks);
-                            remainingRegions.getAndDecrement();
-                        } finally {
-                            while (--regionsCount >= 0) {
-                                regions[regionsCount].close();
-                                regions[regionsCount] = null;
+                        }
+                    } finally {
+                        buf.release();
+                        while (--regionsCount >= 0) {
+                            regions[regionsCount].release();
+                            regions[regionsCount] = null;
+                        }
+                    }
+                    if (chunks > 0) {
+                        try (FileChannel channel = FileChannel.open(dstFile.toPath(), WRITE_OPEN_OPTIONS)) {
+                            int writeable = buf.readableBytes();
+                            int written = buf.readBytes(channel, writeable);
+                            if (writeable != written) {
+                                throw new IllegalStateException(String.format("Only wrote %d/%d bytes!", written, writeable));
                             }
                         }
-                    });
-        }
+                        totalChunks.getAndAdd(chunks);
+                    } else {
+                        logger.warn("Found no input chunks for region (%d,%d)", pos.getX(), pos.getY());
+                    }
+                    remainingRegions.getAndDecrement();
+                });
 
         time = System.currentTimeMillis() - time;
         logger.success(

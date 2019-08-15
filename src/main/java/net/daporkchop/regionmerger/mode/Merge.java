@@ -163,24 +163,29 @@ public class Merge implements Mode {
                     for (int z = 31; z >= 0; z--) {
                         int offset = getOffsetIndex(x, z);
                         for (int i = 0; i < regionsCount; i++) {
-                            ByteBuf region = regions[i];
-                            int chunkOffset = region.getInt(offset);
-                            if (chunkOffset != 0) {
-                                int chunkPos = (chunkOffset >> 8) * SECTOR_BYTES;
-                                //int chunkSectors = chunkOffset & 0xFF;
+                            try {
+                                ByteBuf region = regions[i];
+                                int chunkOffset = region.getInt(offset);
+                                if (chunkOffset != 0) {
+                                    int chunkPos = (chunkOffset >> 8) * SECTOR_BYTES;
+                                    //int chunkSectors = chunkOffset & 0xFF;
 
-                                int sizeBytes = region.getInt(chunkPos);
+                                    int sizeBytes = region.getInt(chunkPos);
 
-                                buf.writeBytes(region, chunkPos, sizeBytes + LENGTH_HEADER_SIZE);
-                                buf.writeBytes(EMPTY_SECTOR, 0, ((buf.writerIndex() - 1 >> 12) + 1 << 12) - buf.writerIndex()); //pad to next sector
+                                    buf.setInt(offset + SECTOR_BYTES, region.getInt(offset + SECTOR_BYTES)); //copy timestamp
 
-                                int chunkSectors = buf.writerIndex() >> 12;
+                                    buf.writeBytes(region, chunkPos, sizeBytes + LENGTH_HEADER_SIZE); //copy chunk data
+                                    buf.writeBytes(EMPTY_SECTOR, 0, ((buf.writerIndex() - 1 >> 12) + 1 << 12) - buf.writerIndex()); //pad to next sector
 
-                                buf.setInt(offset, (chunkSectors - sector) | (sector << 8));
-                                buf.setInt(offset + SECTOR_BYTES, region.getInt(offset + SECTOR_BYTES));
-                                sector = chunkSectors;
-                                chunks++;
-                                break;
+                                    int chunkSectors = buf.writerIndex() >> 12; //compute next chunk sector
+                                    buf.setInt(offset, (chunkSectors - sector) | (sector << 8)); //set offset value in region header
+                                    sector = chunkSectors;
+                                    chunks++;
+                                    break;
+                                }
+                            } catch (IndexOutOfBoundsException e)   {
+                                //i belive this is caused by corruption
+                                logger.alert("%s\n\nThis is most likely caused by corruption!\n\nCaused at (%d,%d) in (%d,%d)", e, x, z, pos.getX(), pos.getY());
                             }
                         }
                     }
