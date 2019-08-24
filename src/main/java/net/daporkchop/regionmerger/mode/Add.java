@@ -151,7 +151,7 @@ public class Add implements Mode {
                         }
                         regions[regionsCount++] = buf;
                     }
-                    for (int i = 0; i < regions.length; i++) {
+                    for (int i = 0; i < regions.length - 1; i++) {
                         World world = sources.get(i);
                         if (world.regions().contains(pos)) {
                             ByteBuf buf = null;
@@ -181,10 +181,7 @@ public class Add implements Mode {
                     }
 
                     int chunks = 0;
-                    ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(
-                            SECTOR_BYTES * (2 + 32 * 32),
-                            SECTOR_BYTES * ((32 * 32) * 256 + 2)
-                    ).writeBytes(EMPTY_SECTOR).writeBytes(EMPTY_SECTOR);
+                    ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(SECTOR_BYTES * (2 + 32 * 32)).writeBytes(EMPTY_HEADERS);
                     try {
                         int sector = 2;
                         for (int x = 31; x >= 0; x--) {
@@ -202,7 +199,7 @@ public class Add implements Mode {
                                         buf.writeBytes(region, chunkPos, sizeBytes + LENGTH_HEADER_SIZE);
                                         buf.writeBytes(EMPTY_SECTOR, 0, ((buf.writerIndex() - 1 >> 12) + 1 << 12) - buf.writerIndex()); //pad to next sector
 
-                                        int chunkSectors = buf.writerIndex() >> 12;
+                                        int chunkSectors = (buf.writerIndex() - 1 >> 12) + 1;
 
                                         buf.setInt(offset, (chunkSectors - sector) | (sector << 8));
                                         buf.setInt(offset + SECTOR_BYTES, region.getInt(offset + SECTOR_BYTES));

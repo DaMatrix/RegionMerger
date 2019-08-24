@@ -22,6 +22,7 @@ import net.daporkchop.lib.common.function.io.IOConsumer;
 import net.daporkchop.lib.common.function.throwing.ERunnable;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
+import net.daporkchop.lib.unsafe.PUnsafe;
 import net.daporkchop.regionmerger.World;
 import net.daporkchop.regionmerger.option.Arguments;
 import net.daporkchop.regionmerger.option.Option;
@@ -31,10 +32,13 @@ import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.file.OpenOption;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static net.daporkchop.regionmerger.anvil.RegionConstants.*;
 
@@ -113,6 +117,7 @@ public class Merge implements Mode {
         }
 
         ThreadLocal<ByteBuf[]> REGIONS_CACHE = ThreadLocal.withInitial(() -> new ByteBuf[sources.size()]);
+        ThreadLocal<List<String>> FILENAMES_CACHE = ThreadLocal.withInitial(ArrayList::new);
         regionPositions.parallelStream().forEach((IOConsumer<Vec2i>) pos -> {
             /*List<OverclockedRegionFile> regions = new LinkedList<>();
             for (int i = 0; i < sources.size(); i++) {
@@ -122,15 +127,20 @@ public class Merge implements Mode {
                 }
             }*/
             ByteBuf[] regions = REGIONS_CACHE.get();
+            List<String> filenames = FILENAMES_CACHE.get();
+            filenames.clear();
             int regionsCount = 0;
             for (int i = 0; i < regions.length; i++) {
                 World world = sources.get(i);
                 if (world.regions().contains(pos)) {
                     ByteBuf buf = null;
-                    try (FileChannel channel = FileChannel.open(world.getAsFile(pos).toPath(), READ_OPEN_OPTIONS)) {
+                    File f = world.getAsFile(pos);
+                    try (FileChannel channel = FileChannel.open(f.toPath(), READ_OPEN_OPTIONS)) {
                         long size = channel.size();
                         if (size > Integer.MAX_VALUE) {
-                            throw new IllegalStateException(String.format("Region too big: %s (%d bytes)", world.getAsFile(pos).getAbsolutePath(), size));
+                            throw new IllegalStateException(String.format("Region too big: %s (%d bytes)", f.getAbsolutePath(), size));
+                        } else if (size < HEADER_BYTES) {
+                            throw new IllegalStateException(String.format("Region too small: %s (%d bytes)", f.getAbsolutePath(), size));
                         }
                         buf = PooledByteBufAllocator.DEFAULT.ioBuffer((int) size);
                         int cnt = buf.writeBytes(channel, (int) size);
@@ -148,44 +158,50 @@ public class Merge implements Mode {
                             continue;
                         }
                     }
+                    filenames.add(f.getAbsolutePath());
                     regions[regionsCount++] = buf;
                 }
             }
 
-            ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(
-                    SECTOR_BYTES * (2 + 32 * 32),
-                    SECTOR_BYTES * ((32 * 32) * 256 + 2)
-            ).writeBytes(EMPTY_SECTOR).writeBytes(EMPTY_SECTOR);
+            logger.debug("Copying region (%d,%d) using input regions: %s", pos.getX(), pos.getY(), IntStream.range(0, regionsCount).collect(
+                    () -> new StringJoiner(", ", "[", "]"),
+                    (joiner, i) -> joiner.add(String.format("\"%s\" (%d bytes)", filenames.get(i), regions[i].writerIndex())),
+                    StringJoiner::merge
+            ).toString());
+
+            ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(SECTOR_BYTES * (2 + 32 * 32)).writeBytes(EMPTY_HEADERS);
             try {
                 int sector = 2;
                 int chunks = 0;
                 for (int x = 31; x >= 0; x--) {
                     for (int z = 31; z >= 0; z--) {
-                        int offset = getOffsetIndex(x, z);
+                        final int offset = getOffsetIndex(x, z);
                         for (int i = 0; i < regionsCount; i++) {
                             try {
                                 ByteBuf region = regions[i];
-                                int chunkOffset = region.getInt(offset);
+                                final int chunkOffset = region.getInt(offset);
                                 if (chunkOffset != 0) {
-                                    int chunkPos = (chunkOffset >> 8) * SECTOR_BYTES;
+                                    final int chunkPos = (chunkOffset >>> 8) * SECTOR_BYTES;
                                     //int chunkSectors = chunkOffset & 0xFF;
 
-                                    int sizeBytes = region.getInt(chunkPos);
+                                    final int sizeBytes = region.getInt(chunkPos);
 
                                     buf.setInt(offset + SECTOR_BYTES, region.getInt(offset + SECTOR_BYTES)); //copy timestamp
 
                                     buf.writeBytes(region, chunkPos, sizeBytes + LENGTH_HEADER_SIZE); //copy chunk data
                                     buf.writeBytes(EMPTY_SECTOR, 0, ((buf.writerIndex() - 1 >> 12) + 1 << 12) - buf.writerIndex()); //pad to next sector
 
-                                    int chunkSectors = buf.writerIndex() >> 12; //compute next chunk sector
+                                    final int chunkSectors = (buf.writerIndex() - 1 >> 12) + 1; //compute next chunk sector
                                     buf.setInt(offset, (chunkSectors - sector) | (sector << 8)); //set offset value in region header
                                     sector = chunkSectors;
                                     chunks++;
                                     break;
                                 }
                             } catch (IndexOutOfBoundsException e)   {
+                                StringJoiner joiner = new StringJoiner("\n");
+                                Logger.getStackTrace(e, joiner::add);
                                 //i belive this is caused by corruption
-                                logger.alert("%s\n\nThis is most likely caused by corruption!\n\nCaused at (%d,%d) in (%d,%d)", e, x, z, pos.getX(), pos.getY());
+                                logger.alert("%s\n\nThis is most likely caused by corruption!\n\nCaused at (%d,%d) in (%d,%d): \"%s\"", joiner, x, z, pos.getX(), pos.getY(), filenames.get(i));
                             }
                         }
                     }
@@ -203,6 +219,9 @@ public class Merge implements Mode {
                     logger.warn("Found no input chunks for region (%d,%d)", pos.getX(), pos.getY());
                 }
                 remainingRegions.getAndDecrement();
+            } catch (Exception e)   {
+                logger.alert("%s\n\nWhile processing region (%d,%d)", e, pos.getX(), pos.getY());
+                PUnsafe.throwException(e);
             } finally {
                 buf.release();
                 while (--regionsCount >= 0) {

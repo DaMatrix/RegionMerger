@@ -19,6 +19,7 @@ import net.daporkchop.lib.logging.LogAmount;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.logging.Logging;
 import net.daporkchop.regionmerger.mode.Add;
+import net.daporkchop.regionmerger.mode.DeleteFromFile;
 import net.daporkchop.regionmerger.mode.FindMissing;
 import net.daporkchop.regionmerger.mode.Merge;
 import net.daporkchop.regionmerger.mode.Mode;
@@ -41,6 +42,8 @@ public class RegionMerger implements Logging {
             this.put("findmissing", new FindMissing());
             this.put("merge", new Merge());
             this.put("optimize", new Optimize());
+
+            this.put("deletefromfile", new DeleteFromFile());
         }
     };
 

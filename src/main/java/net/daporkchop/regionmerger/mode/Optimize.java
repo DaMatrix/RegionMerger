@@ -23,6 +23,7 @@ import net.daporkchop.lib.common.function.io.IOConsumer;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.regionmerger.World;
 import net.daporkchop.regionmerger.anvil.OverclockedRegionFile;
+import net.daporkchop.regionmerger.anvil.ex.CannotOpenRegionException;
 import net.daporkchop.regionmerger.option.Arguments;
 import net.daporkchop.regionmerger.option.Option;
 
@@ -39,8 +40,7 @@ import java.util.zip.DeflaterOutputStream;
 import java.util.zip.Inflater;
 import java.util.zip.InflaterOutputStream;
 
-import static net.daporkchop.regionmerger.anvil.RegionConstants.ID_DEFLATE;
-import static net.daporkchop.regionmerger.anvil.RegionConstants.SECTOR_BYTES;
+import static net.daporkchop.regionmerger.anvil.RegionConstants.*;
 
 /**
  * @author DaPorkchop_
@@ -109,7 +109,7 @@ public class Optimize implements Mode {
                         }
                         int size = buf.writerIndex() - oldIndex;
                         buf.setInt(oldIndex, size - 4);
-                        return size / SECTOR_BYTES + 1;
+                        return size;
                     } finally {
                         chunk.release();
                     }
@@ -128,7 +128,7 @@ public class Optimize implements Mode {
                         if (chunk.isReadable()) {
                             throw new IllegalStateException("Couldn't copy entire chunk into output buffer!");
                         }
-                        return size / SECTOR_BYTES + 1;
+                        return size;
                     } finally {
                         chunk.release();
                     }
@@ -139,7 +139,7 @@ public class Optimize implements Mode {
         }
 
         regionsAsFiles.parallelStream().forEach((IOConsumer<File>) file -> {
-            ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(SECTOR_BYTES * 3).writerIndex(SECTOR_BYTES * 2);
+            ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(SECTOR_BYTES * (2 + 32 * 32)).writeBytes(EMPTY_HEADERS);
             try {
                 int sector = 2;
                 int chunks = 0;
@@ -148,13 +148,18 @@ public class Optimize implements Mode {
                         for (int z = 31; z >= 0; z--) {
                             int cnt = recoder.recode(region, buf, x, z);
                             if (cnt != -1) {
-                                buf.setInt((x << 2) | (z << 7), cnt | (sector << 8));
+                                buf.writeBytes(EMPTY_SECTOR, 0, ((buf.writerIndex() - 1 >> 12) + 1 << 12) - buf.writerIndex()); //pad to next sector
+                                cnt = (cnt - 1 >> 12) + 1;
+                                buf.setInt(getOffsetIndex(x, z), cnt | (sector << 8));
+                                buf.setInt(getTimestampIndex(x, z), region.getTimestamp(x, z));
                                 sector += cnt;
-                                buf.writerIndex(SECTOR_BYTES * sector);
                                 chunks++;
                             }
                         }
                     }
+                } catch (CannotOpenRegionException e)   {
+                    logger.warn("%s", e);
+                    return;
                 }
                 if (chunks == 0 && !file.delete()) {
                     throw new IllegalStateException(String.format("Couldn't delete file \"%s\"!", file.getAbsolutePath()));
@@ -176,7 +181,7 @@ public class Optimize implements Mode {
         regionsAsFiles.removeIf(f -> !f.exists());
         long finalSize = regionsAsFiles.parallelStream().mapToLong(File::length).sum();
         logger.success("Done! Processed %d regions (deleting %d empty regions)", oldCount, oldCount - regionsAsFiles.size());
-        logger.success("Shrunk by %.2f MB (%.3f%%)", (initialSize - finalSize) / (1024.0d * 1024.0d), (double) finalSize / (double) initialSize);
+        logger.success("Shrunk by %.2f MB (%.3f%%)", (initialSize - finalSize) / (1024.0d * 1024.0d), (1.0d - (double) finalSize / (double) initialSize) * 100.0d);
     }
 
     @FunctionalInterface

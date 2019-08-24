@@ -27,6 +27,7 @@ import net.daporkchop.lib.binary.stream.DataOut;
 import net.daporkchop.lib.common.misc.file.PFiles;
 import net.daporkchop.lib.encoding.ToBytes;
 import net.daporkchop.lib.encoding.compression.CompressionHelper;
+import net.daporkchop.lib.logging.Logging;
 import net.daporkchop.regionmerger.anvil.ex.CannotOpenRegionException;
 import net.daporkchop.regionmerger.anvil.ex.ReadOnlyRegionException;
 
@@ -57,7 +58,7 @@ import static net.daporkchop.regionmerger.anvil.RegionConstants.*;
  * @see RegionFile for the region spec
  */
 @Accessors(fluent = true)
-public class OverclockedRegionFile implements AutoCloseable {
+public class OverclockedRegionFile implements RegionFile, Logging {
     protected static final OpenOption[] RO_OPEN_OPTIONS = {StandardOpenOption.READ};
     protected static final OpenOption[] RW_OPEN_OPTIONS = {StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE};
 
@@ -122,11 +123,15 @@ public class OverclockedRegionFile implements AutoCloseable {
 
         this.occupiedSectors.set(0, 2);
         //init occupied sectors bitset
-        for (int i = SECTOR_INTS - 1; i >= 0; i--) {
-            int offset = this.index.getInt(i << 2);
-            if (offset != 0) {
-                this.occupiedSectors.set(offset >> 8, (offset >> 8) + (offset & 0xFF));
+        try {
+            for (int i = SECTOR_INTS - 1; i >= 0; i--) {
+                int offset = this.index.getInt(i << 2);
+                if (offset != 0) {
+                    this.occupiedSectors.set(offset >> 8, (offset >> 8) + (offset & 0xFF));
+                }
             }
+        } catch (IndexOutOfBoundsException e)   {
+            throw new CannotOpenRegionException(String.format("Corrupt region headers in \"%s\"", file.getAbsolutePath()));
         }
         this.absolutePath = file.getAbsolutePath();
 
