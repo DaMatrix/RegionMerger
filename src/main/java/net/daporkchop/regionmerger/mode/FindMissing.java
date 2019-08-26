@@ -19,6 +19,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.PooledByteBufAllocator;
 import lombok.NonNull;
 import net.daporkchop.lib.common.function.io.IOFunction;
+import net.daporkchop.lib.common.util.PorkUtil;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
 import net.daporkchop.regionmerger.World;
@@ -28,16 +29,21 @@ import net.daporkchop.regionmerger.option.Option;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.OpenOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
 import java.util.StringJoiner;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static java.lang.Math.min;
 import static net.daporkchop.regionmerger.anvil.RegionConstants.SECTOR_BYTES;
+import static net.daporkchop.regionmerger.anvil.RegionConstants.getOffsetIndex;
 
 /**
  * @author DaPorkchop_
@@ -58,7 +64,7 @@ public class FindMissing implements Mode {
                 .info("    Searches for missing chunks within a given area and saves them to a file (missingchunks.json).")
                 .info("")
                 .info("    Usage:")
-                .info("      findmissing [options] <path>")
+                .info("      findmissing [options] <paths...>")
                 .info("")
                 .info("    Options:")
                 .info("      --minX <minX>       Set the min X coord to check (in regions) (inclusive)")
@@ -70,7 +76,7 @@ public class FindMissing implements Mode {
 
     @Override
     public Arguments arguments() {
-        return new Arguments(true, false, MIN_X, MIN_Z, MAX_X, MAX_Z, OVERWRITE);
+        return new Arguments(false, true, MIN_X, MIN_Z, MAX_X, MAX_Z, OVERWRITE);
     }
 
     @Override
@@ -84,11 +90,12 @@ public class FindMissing implements Mode {
             throw new UnsupportedOperationException("findmissing mode is currently unimplemented.");
         }
 
+        final List<World> sources = args.getSources();
+
         final int minX = args.get(MIN_X);
         final int minZ = args.get(MIN_Z);
         final int maxX = args.get(MAX_X);
         final int maxZ = args.get(MAX_Z);
-        final World world = args.getDestination();
         if (min(minX, min(minZ, min(maxX, maxZ))) == Integer.MIN_VALUE) {
             throw new IllegalArgumentException("minX, minZ, maxX and maxZ must all be set!");
         } else if (maxX < minX) {
@@ -96,6 +103,8 @@ public class FindMissing implements Mode {
         } else if (maxZ < minZ) {
             throw new IllegalArgumentException("maxZ must be greater than or equal to minZ!");
         }
+
+        logger.info("Loaded %d input worlds with a total of %d distinct regions.", sources.size(), sources.stream().map(World::regions).flatMap(Collection::stream).distinct().count());
 
         final int deltaX = (maxX + 1) - minX;
         final int deltaZ = (maxZ + 1) - minZ;
@@ -116,45 +125,55 @@ public class FindMissing implements Mode {
                 }
             }
 
+            ThreadLocal<MappedByteBuffer[]> BUFFER_ARRAY_CACHE = ThreadLocal.withInitial(() -> new MappedByteBuffer[sources.size()]);
             ThreadLocal<Vec2i[]> VEC2I_ARRAY_CACHE = ThreadLocal.withInitial(() -> new Vec2i[32 * 32]);
             byte[] json = Arrays.stream(searchPositions).parallel()
                     .flatMap((IOFunction<Vec2i, Stream<Vec2i>>) regionPos -> {
-                        if (world.regions().contains(regionPos)) {
-                            //region exists, scan the chunks
-                            ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(SECTOR_BYTES);
-                            try {
-                                try (FileChannel channel = FileChannel.open(world.getAsFile(regionPos).toPath(), REGION_OPEN_OPTIONS)) {
-                                    if (buf.writeBytes(channel, 0L, SECTOR_BYTES) != SECTOR_BYTES) {
-                                        throw new IllegalStateException(String.format("Only read %d/%d bytes!", buf.writerIndex(), SECTOR_BYTES));
+                        MappedByteBuffer[] buf = BUFFER_ARRAY_CACHE.get();
+                        int bufCount = 0;
+
+                        try {
+                            for (World world : sources) {
+                                if (world.regions().contains(regionPos))    {
+                                    try (FileChannel channel = FileChannel.open(world.getAsFile(regionPos).toPath(), REGION_OPEN_OPTIONS)) {
+                                        if (channel.size() < SECTOR_BYTES)  {
+                                            continue;
+                                        }
+                                        buf[bufCount++] = channel.map(FileChannel.MapMode.READ_ONLY, 0L, 4096L);
                                     }
                                 }
+                            }
 
+                            if (bufCount > 0) {
                                 int missing = 0;
                                 Vec2i[] arr = VEC2I_ARRAY_CACHE.get();
                                 for (int x = 31; x >= 0; x--) {
+                                    LOOP_Z:
                                     for (int z = 31; z >= 0; z--) {
-                                        if (buf.getInt((x << 2) | (z << 7)) == 0) {
-                                            arr[missing++] = new Vec2i(regionPos.getX() * 32 + x, regionPos.getY() * 32 + z);
+                                        for (int i = bufCount - 1; i >= 0; i--) {
+                                            if (buf[i].getInt(getOffsetIndex(x, z)) != 0) {
+                                                continue LOOP_Z;
+                                            }
                                         }
+                                        arr[missing++] = new Vec2i(regionPos.getX() * 32 + x, regionPos.getY() * 32 + z);
                                     }
                                 }
                                 return missing == 0 ? Stream.empty() : Arrays.stream(Arrays.copyOf(arr, missing));
-                                /*return Arrays.stream(IntStream.range(0, 32 * 32)
-                                        .filter(i -> buf.getInt(i << 2) == 0)
-                                        .mapToObj(i -> new Vec2i(regionPos.getX() * 32 + (i & 0x1F), regionPos.getY() * 32 + ((i >> 5) & 0x1F)))
-                                        .toArray(Vec2i[]::new));*/
-                            } finally {
-                                buf.release();
-                            }
-                        } else {
-                            //region doesn't exist, so all chunks are missing
-                            Vec2i[] result = new Vec2i[32 * 32];
-                            for (int x = 31; x >= 0; x--) {
-                                for (int z = 31; z >= 0; z--) {
-                                    result[x * 32 + z] = new Vec2i(regionPos.getX() * 32 + x, regionPos.getY() * 32 + z);
+                            } else {
+                                //region doesn't exist in any input, so all chunks are missing
+                                Vec2i[] result = new Vec2i[32 * 32];
+                                for (int x = 31; x >= 0; x--) {
+                                    for (int z = 31; z >= 0; z--) {
+                                        result[x * 32 + z] = new Vec2i(regionPos.getX() * 32 + x, regionPos.getY() * 32 + z);
+                                    }
                                 }
+                                return Arrays.stream(result);
                             }
-                            return Arrays.stream(result);
+                        } finally {
+                            while (bufCount-- != 0) {
+                                PorkUtil.release(buf[bufCount]);
+                                buf[bufCount] = null;
+                            }
                         }
                     })
                     .map(v -> String.format("{\"x\":%d,\"z\":%d}", v.getX(), v.getY()))

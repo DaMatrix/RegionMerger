@@ -43,7 +43,7 @@ public class RegionMerger implements Logging {
             this.put("merge", new Merge());
             this.put("optimize", new Optimize());
 
-            this.put("deletefromfile", new DeleteFromFile());
+            this.put("debug-deletefromfile", new DeleteFromFile());
         }
     };
 

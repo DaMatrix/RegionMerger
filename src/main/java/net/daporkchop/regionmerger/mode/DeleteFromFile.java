@@ -21,7 +21,6 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.PooledByteBufAllocator;
 import lombok.NonNull;
 import net.daporkchop.lib.common.function.io.IOConsumer;
-import net.daporkchop.lib.common.misc.file.PFiles;
 import net.daporkchop.lib.common.util.PorkUtil;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
@@ -34,12 +33,12 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
-import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.OpenOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Collection;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -50,9 +49,9 @@ import static net.daporkchop.regionmerger.anvil.RegionConstants.getOffsetIndex;
  * @author DaPorkchop_
  */
 public class DeleteFromFile implements Mode {
-    protected static final OpenOption[] READ_ONLY_OPEN_OPTIONS = {StandardOpenOption.READ};
-    protected static final OpenOption[] BACKUP_WRITE_OPEN_OPTIONS = {StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW, StandardOpenOption.TRUNCATE_EXISTING};
-    protected static final OpenOption[] CHUNK_DELETE_OPEN_OPTIONS = {StandardOpenOption.WRITE};
+    protected static final OpenOption[] READ_ONLY_OPEN_OPTIONS    = {StandardOpenOption.READ};
+    protected static final OpenOption[] BACKUP_WRITE_OPEN_OPTIONS = {StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING};
+    protected static final OpenOption[] CHUNK_DELETE_OPEN_OPTIONS = {StandardOpenOption.READ, StandardOpenOption.WRITE};
 
     @Override
     public void printUsage(@NonNull Logger logger) {
@@ -70,13 +69,18 @@ public class DeleteFromFile implements Mode {
 
     @Override
     public void run(@NonNull Arguments args) throws IOException {
-        final World dst = new World(new File("/home/daporkchop/192.168.1.119/Minecraft/2b2t/2b2t_100k_partial/region"), false);
+        final World dst = new World(new File("."), false);
 
         logger.info("Loaded output world with %d existing regions.", dst.regions().size());
 
         Collection<Vec2i> missingChunks;
-        try (Reader reader = new InputStreamReader(new BufferedInputStream(new FileInputStream(new File("/home/daporkchop/192.168.1.119/Minecraft/2b2t/scanresult-onlychunks.json"))))) {
-            missingChunks = StreamSupport.stream(new JsonParser().parse(reader).getAsJsonArray().spliterator(), false)
+        try (Reader reader = new InputStreamReader(new BufferedInputStream(new FileInputStream(new File("./scanresult.json"))))) {
+            missingChunks = new JsonParser().parse(reader).getAsJsonObject().entrySet().stream()
+                    .filter(entry -> entry.getKey().equals("nether_chunks") || entry.getKey().equals("empty_chunks"))
+                    .map(Map.Entry::getValue)
+                    .map(JsonElement::getAsJsonObject)
+                    .map(obj -> obj.getAsJsonObject("data").getAsJsonArray("chunks"))
+                    .flatMap(arr -> StreamSupport.stream(arr.spliterator(), false))
                     .map(JsonElement::getAsJsonObject)
                     .map(obj -> new Vec2i(obj.get("x").getAsInt(), obj.get("z").getAsInt()))
                     .collect(Collectors.toSet());
@@ -89,33 +93,27 @@ public class DeleteFromFile implements Mode {
         logger.info("Loaded %d missing chunk positions in %d regions.", missingChunks.size(), missingRegions.size())
                 .info("Backing up regions...");
 
-        {
-            File backupPath = new File(dst.path().getAbsoluteFile().getParentFile(), "region_backup");
-            PFiles.ensureDirectoryExists(backupPath);
-            PFiles.rmContents(backupPath);
-
-            missingRegions.parallelStream()
-                    .map(dst::getAsFile)
-                    .filter(File::exists)
-                    .forEach((IOConsumer<File>) file -> {
-                        int len = (int) file.length();
-                        ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(len);
-                        try {
-                            try (FileChannel channel = FileChannel.open(file.toPath(), READ_ONLY_OPEN_OPTIONS)) {
-                                if (buf.writeBytes(channel, len) != len) {
-                                    throw new IllegalStateException(String.format("Couldn't read %d bytes!", len));
-                                }
+        missingRegions.parallelStream()
+                .map(dst::getAsFile)
+                .filter(File::exists)
+                .forEach((IOConsumer<File>) file -> {
+                    int len = (int) file.length();
+                    ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(len);
+                    try {
+                        try (FileChannel channel = FileChannel.open(file.toPath(), READ_ONLY_OPEN_OPTIONS)) {
+                            if (buf.writeBytes(channel, len) != len) {
+                                throw new IllegalStateException(String.format("Couldn't read %d bytes!", len));
                             }
-                            try (FileChannel channel = FileChannel.open(new File(backupPath, file.getName()).toPath(), BACKUP_WRITE_OPEN_OPTIONS)) {
-                                if (buf.readBytes(channel, len) != len) {
-                                    throw new IllegalStateException(String.format("Couldn't write %d bytes!", len));
-                                }
-                            }
-                        } finally {
-                            buf.release();
                         }
-                    });
-        }
+                        try (FileChannel channel = FileChannel.open(new File(file.getAbsolutePath() + ".bak").toPath(), BACKUP_WRITE_OPEN_OPTIONS)) {
+                            if (buf.readBytes(channel, len) != len) {
+                                throw new IllegalStateException(String.format("Couldn't write %d bytes!", len));
+                            }
+                        }
+                    } finally {
+                        buf.release();
+                    }
+                });
 
         if (false) {
             logger.info("Searching for regions containing the missing chunks...");
@@ -132,7 +130,7 @@ public class DeleteFromFile implements Mode {
                             MappedByteBuffer headers = channel.map(FileChannel.MapMode.READ_WRITE, 0L, SECTOR_BYTES);
                             missingChunks.stream()
                                     .filter(chunk -> (chunk.getX() >> 5) == pos.getX() && (chunk.getY() >> 5) == pos.getY())
-                                    .mapToInt(chunk -> getOffsetIndex(chunk.getX(), chunk.getY()))
+                                    .mapToInt(chunk -> getOffsetIndex(chunk.getX() & 0x1F, chunk.getY() & 0x1F))
                                     .distinct()
                                     .forEach(index -> headers.putInt(index, 0));
                             PorkUtil.release(headers.force());
