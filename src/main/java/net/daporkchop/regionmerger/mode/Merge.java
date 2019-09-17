@@ -182,8 +182,6 @@ public class Merge implements Mode {
                                 final int chunkOffset = region.getInt(offset);
                                 if (chunkOffset != 0) {
                                     final int chunkPos = (chunkOffset >>> 8) * SECTOR_BYTES;
-                                    //int chunkSectors = chunkOffset & 0xFF;
-
                                     final int sizeBytes = region.getInt(chunkPos);
 
                                     buf.setInt(offset + SECTOR_BYTES, region.getInt(offset + SECTOR_BYTES)); //copy timestamp
