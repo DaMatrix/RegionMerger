@@ -42,7 +42,6 @@ ext {
 dependencies {
     compile "net.daporkchop.lib:binary:$porklibVersion"
     compile "net.daporkchop.lib:logging:$porklibVersion"
-    compile "net.daporkchop.lib:nbt:$porklibVersion"
     compile "net.daporkchop.lib:primitive:$porklibVersion"
 
     compile "io.netty:netty-buffer:$nettyVersion"
