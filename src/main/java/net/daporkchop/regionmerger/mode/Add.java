@@ -36,7 +36,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
-import static net.daporkchop.regionmerger.anvil.RegionConstants.*;
+import static net.daporkchop.lib.minecraft.world.format.anvil.region.RegionConstants.*;
 
 /**
  * @author DaPorkchop_
@@ -181,7 +181,7 @@ public class Add implements Mode {
                     }
 
                     int chunks = 0;
-                    ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(SECTOR_BYTES * (2 + 32 * 32)).writeBytes(EMPTY_HEADERS);
+                    ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(SECTOR_BYTES * (2 + 32 * 32)).writeBytes(EMPTY_SECTOR).writeBytes(EMPTY_SECTOR);
                     try {
                         int sector = 2;
                         for (int x = 31; x >= 0; x--) {

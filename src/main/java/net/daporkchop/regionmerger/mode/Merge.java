@@ -40,7 +40,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static net.daporkchop.regionmerger.anvil.RegionConstants.*;
+import static net.daporkchop.lib.minecraft.world.format.anvil.region.RegionConstants.*;
 
 /**
  * @author DaPorkchop_
@@ -169,7 +169,7 @@ public class Merge implements Mode {
                     StringJoiner::merge
             ).toString());
 
-            ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(SECTOR_BYTES * (2 + 32 * 32)).writeBytes(EMPTY_HEADERS);
+            ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(SECTOR_BYTES * (2 + 32 * 32)).writeBytes(EMPTY_SECTOR).writeBytes(EMPTY_SECTOR);
             try {
                 int sector = 2;
                 int chunks = 0;

@@ -19,10 +19,15 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.PooledByteBufAllocator;
 import lombok.NonNull;
 import lombok.experimental.UtilityClass;
-import net.daporkchop.lib.binary.netty.NettyUtil;
 import net.daporkchop.lib.common.function.io.IOConsumer;
 import net.daporkchop.lib.common.function.throwing.ERunnable;
 import net.daporkchop.lib.logging.Logger;
+import net.daporkchop.lib.minecraft.world.format.anvil.region.RegionFile;
+import net.daporkchop.lib.minecraft.world.format.anvil.region.RegionOpenOptions;
+import net.daporkchop.lib.natives.PNatives;
+import net.daporkchop.lib.natives.zlib.PDeflater;
+import net.daporkchop.lib.natives.zlib.PInflater;
+import net.daporkchop.lib.natives.zlib.Zlib;
 import net.daporkchop.lib.unsafe.PUnsafe;
 import net.daporkchop.regionmerger.World;
 import net.daporkchop.regionmerger.option.Arguments;
@@ -31,7 +36,6 @@ import net.daporkchop.regionmerger.option.Option;
 import java.io.File;
 import java.io.FilterOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.channels.FileChannel;
 import java.nio.file.OpenOption;
@@ -42,10 +46,9 @@ import java.util.stream.Collectors;
 import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.Inflater;
-import java.util.zip.InflaterInputStream;
 import java.util.zip.InflaterOutputStream;
 
-import static net.daporkchop.regionmerger.anvil.RegionConstants.*;
+import static net.daporkchop.lib.minecraft.world.format.anvil.region.RegionConstants.*;
 
 /**
  * @author DaPorkchop_
@@ -54,6 +57,10 @@ public class Optimize implements Mode {
     protected static final Option.Flag RECOMPRESS            = Option.flag("c");
     protected static final Option.Int  LEVEL                 = Option.integer("l", 7, 0, 8);
     protected static final Option.Int  PROGRESS_UPDATE_DELAY = Option.integer("p", 5000, 0, Integer.MAX_VALUE);
+
+    protected static final RegionOpenOptions REGION_OPEN_OPTIONS = new RegionOpenOptions()
+            .mode(RegionFile.Mode.MMAP_FULL)
+            .access(RegionFile.Access.READ_ONLY);
 
     protected static final OpenOption[] INPUT_OPEN_OPTIONS  = {StandardOpenOption.READ};
     protected static final OpenOption[] OUTPUT_OPEN_OPTIONS = {StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING};
@@ -98,29 +105,30 @@ public class Optimize implements Mode {
 
         ChunkRecoder recoder;
         if (recompress) {
-            ThreadLocal<Inflater> inflaterCache = ThreadLocal.withInitial(Inflater::new);
-            ThreadLocal<Deflater> deflaterCache = ThreadLocal.withInitial(() -> new Deflater(level));
+            ThreadLocal<PInflater> inflaterCache = ThreadLocal.withInitial(() -> PNatives.ZLIB.get().inflater(Zlib.ZLIB_MODE_AUTO));
+            ThreadLocal<PDeflater> deflaterCache = ThreadLocal.withInitial(() -> PNatives.ZLIB.get().deflater(level));
             recoder = (src, dst) -> {
-                Deflater deflater = deflaterCache.get();
-                Inflater inflater = inflaterCache.get();
+                PDeflater deflater = deflaterCache.get();
+                PInflater inflater = inflaterCache.get();
+
+                byte mode = src.readByte();
+                if (mode != ID_ZLIB && mode != ID_GZIP) {
+                    throw new IllegalArgumentException(String.format("Invalid chunk version: %d", mode & 0xFF));
+                }
 
                 int oldIndex = dst.writerIndex();
-                dst.writeInt(-1).writeByte(ID_DEFLATE);
-                if (src.readerIndex(4).readByte() != ID_DEFLATE) {
-                    throw new IllegalStateException("Can't optimize GZIPped chunks!");
-                }
+                dst.writeInt(-1).writeByte(ID_ZLIB);
 
-                //try (OutputStream out = new InflaterOutputStream(new DeflaterOutputStream(NettyUtil.wrapOut(dst), deflaterCache.get()), inflaterCache.get())) {
-                try (OutputStream out = FastStreams.inflaterOutputStream(FastStreams.deflaterOutputStream(NettyUtil.wrapOut(dst), deflater), inflater)) {
-                    src.readBytes(out, src.readableBytes());
-                    if (src.isReadable()) {
-                        throw new IllegalStateException("Couldn't copy entire chunk into output buffer!");
-                    }
+                ByteBuf tmp = PooledByteBufAllocator.DEFAULT.ioBuffer(2097152);
+                try {
+                    inflater.inflate(src, tmp);
+                    deflater.deflate(tmp, dst);
+                    dst.setInt(oldIndex, dst.writerIndex() - oldIndex - 4);
+                } finally {
+                    tmp.release();
+                    inflater.reset();
+                    deflater.reset();
                 }
-                dst.setInt(oldIndex, dst.writerIndex() - oldIndex - 4);
-
-                deflater.reset();
-                inflater.reset();
             };
             logger.info("Reordering and recompressing %d regions at DEFLATE level %d...", regionsAsFiles.size(), level);
         } else {
@@ -158,42 +166,33 @@ public class Optimize implements Mode {
         }
 
         regionsAsFiles.parallelStream().forEach((IOConsumer<File>) file -> {
-            ByteBuf src = null;
-            ByteBuf dst = PooledByteBufAllocator.DEFAULT.ioBuffer(SECTOR_BYTES * (2 + 32 * 32)).writeBytes(EMPTY_HEADERS);
+            ByteBuf dst = PooledByteBufAllocator.DEFAULT.ioBuffer(SECTOR_BYTES * (2 + 32 * 32)).writeBytes(EMPTY_SECTOR).writeBytes(EMPTY_SECTOR);
             try {
-                try (FileChannel channel = FileChannel.open(file.toPath(), INPUT_OPEN_OPTIONS)) {
-                    long size = channel.size();
-                    if (size > Integer.MAX_VALUE) {
-                        throw new IllegalStateException(String.format("Region \"%s\" too large: %d bytes", file, size));
-                    }
-                    src = PooledByteBufAllocator.DEFAULT.ioBuffer((int) size, (int) size);
-                    int read = src.writeBytes(channel, 0L, (int) size);
-                    if (read != size) {
-                        throw new IllegalStateException(String.format("Only read %d/%d bytes!", read, size));
-                    }
-                }
-
                 int sector = 2;
                 int chunks = 0;
-                for (int x = 31; x >= 0; x--) {
-                    for (int z = 31; z >= 0; z--) {
-                        final int chunkOffset = src.getInt(getOffsetIndex(x, z));
-                        if (chunkOffset == 0) {
-                            continue;
+
+                try (RegionFile region = RegionFile.open(file, REGION_OPEN_OPTIONS)) {
+                    for (int x = 31; x >= 0; x--) {
+                        for (int z = 31; z >= 0; z--) {
+                            if (!region.hasChunk(x, z)) {
+                                continue;
+                            }
+
+                            ByteBuf chunk = region.readDirect(x, z);
+                            try {
+                                dst.setInt(getTimestampIndex(x, z), region.getTimestamp(x, z)); //copy timestamp
+
+                                recoder.recode(chunk, dst);
+                                dst.writeBytes(EMPTY_SECTOR, 0, ((dst.writerIndex() - 1 >> 12) + 1 << 12) - dst.writerIndex()); //pad to next sector
+
+                                final int chunkSectors = (dst.writerIndex() - 1 >> 12) + 1; //compute next chunk sector
+                                dst.setInt(getOffsetIndex(x, z), (chunkSectors - sector) | (sector << 8)); //set offset value in region header
+                                sector = chunkSectors;
+                                chunks++;
+                            } finally {
+                                chunk.release();
+                            }
                         }
-
-                        final int chunkPos = (chunkOffset >>> 8) * SECTOR_BYTES;
-                        final int sizeBytes = src.getInt(chunkPos);
-
-                        dst.setInt(getTimestampIndex(x, z), src.getInt(getTimestampIndex(x, z))); //copy timestamp
-
-                        recoder.recode(src.slice(chunkPos, sizeBytes + 4), dst);
-                        dst.writeBytes(EMPTY_SECTOR, 0, ((dst.writerIndex() - 1 >> 12) + 1 << 12) - dst.writerIndex()); //pad to next sector
-
-                        final int chunkSectors = (dst.writerIndex() - 1 >> 12) + 1; //compute next chunk sector
-                        dst.setInt(getOffsetIndex(x, z), (chunkSectors - sector) | (sector << 8)); //set offset value in region header
-                        sector = chunkSectors;
-                        chunks++;
                     }
                 }
 
@@ -211,9 +210,6 @@ public class Optimize implements Mode {
                 remainingRegions.getAndDecrement();
                 totalChunks.getAndAdd(chunks);
             } finally {
-                if (src != null) {
-                    src.release();
-                }
                 dst.release();
             }
         });
@@ -240,7 +236,7 @@ public class Optimize implements Mode {
 
         private final ThreadLocal<byte[][]> BUFFERS = ThreadLocal.withInitial(() -> new byte[2][4096]);
 
-        public InflaterOutputStream inflaterOutputStream(@NonNull OutputStream dst, @NonNull Inflater inflater)    {
+        public InflaterOutputStream inflaterOutputStream(@NonNull OutputStream dst, @NonNull Inflater inflater) {
             InflaterOutputStream instance = PUnsafe.allocateInstance(InflaterOutputStream.class);
 
             PUnsafe.putObject(instance, FOS_OUT_OFFSET, dst);
@@ -250,7 +246,7 @@ public class Optimize implements Mode {
             return instance;
         }
 
-        public DeflaterOutputStream deflaterOutputStream(@NonNull OutputStream dst, @NonNull Deflater deflater)    {
+        public DeflaterOutputStream deflaterOutputStream(@NonNull OutputStream dst, @NonNull Deflater deflater) {
             DeflaterOutputStream instance = PUnsafe.allocateInstance(DeflaterOutputStream.class);
 
             PUnsafe.putObject(instance, FOS_OUT_OFFSET, dst);

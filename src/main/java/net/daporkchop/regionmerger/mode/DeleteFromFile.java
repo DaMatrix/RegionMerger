@@ -42,8 +42,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
-import static net.daporkchop.regionmerger.anvil.RegionConstants.SECTOR_BYTES;
-import static net.daporkchop.regionmerger.anvil.RegionConstants.getOffsetIndex;
+import static net.daporkchop.lib.minecraft.world.format.anvil.region.RegionConstants.*;
 
 /**
  * @author DaPorkchop_
