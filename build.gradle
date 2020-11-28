@@ -23,12 +23,29 @@ version "0.1.9-SNAPSHOT"
  * OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
  * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
  */
 
-sourceCompatibility = 1.8
+ext {
+    //general things
+    javaVersion = "1.8"
+    programVersion = "0.1.8-SNAPSHOT"
+
+    junitVersion = "4.12"
+    lombokVersion = "1.16.20"
+    mcworldlibVersion = "0.0.1-1.16.4-SNAPSHOT"
+    porklibVersion = "0.5.5-SNAPSHOT"
+}
+
+compileJava {
+    sourceCompatibility = targetCompatibility = "$javaVersion"
+}
+
+tasks.withType(JavaCompile) {
+    options.encoding = "UTF-8"
+}
 
 repositories {
-    mavenLocal()
     maven {
         name = "DaPorkchop_"
         url = "https://maven.daporkchop.net/"
@@ -36,40 +53,38 @@ repositories {
     mavenCentral()
 }
 
-ext {
-    gsonVersion = "2.8.5"
-    junitVersion = "4.12"
-    nettyVersion = "4.1.36.Final"
-    porklibVersion = "0.5.0-SNAPSHOT"
+configurations {
+    shade
+    compile.extendsFrom shade
 }
 
 dependencies {
-    compile "net.daporkchop.lib:binary:$porklibVersion"
-    compile "net.daporkchop.lib:encoding:$porklibVersion"
-    compile "net.daporkchop.lib:logging:$porklibVersion"
-    compile "net.daporkchop.lib:minecraft:$porklibVersion"
-    compile "net.daporkchop.lib:primitive:$porklibVersion"
+    shade "net.daporkchop.lib:logging:$porklibVersion"
 
-    compile "io.netty:netty-buffer:$nettyVersion"
+    shade "net.daporkchop:mcworldlib:$mcworldlibVersion"
 
-    compile "com.google.code.gson:gson:$gsonVersion"
+    compileOnly "org.projectlombok:lombok:$lombokVersion"
+    annotationProcessor "org.projectlombok:lombok:$lombokVersion"
 
     testCompile "junit:junit:$junitVersion"
+    testCompileOnly "org.projectlombok:lombok:$lombokVersion"
+    testAnnotationProcessor "org.projectlombok:lombok:$lombokVersion"
 }
 
 jar {
     from {
-        configurations.compile.collect {
-            zipTree(it)
-        }
+        configurations.shade.collect {
+            it.isDirectory() ? it : zipTree(it)
+        }.unique()
     } {
-        exclude "META-INF/*.SF"
-        exclude "META-INF/*.DSA"
-        exclude "META-INF/*.RSA"
+        exclude "META-INF/**"
+        exclude sourceSets.main.output.asFileTree.collect {
+            return it.getPath().split("java/main/").last()
+        }
     }
 
     manifest {
-        attributes "Implementation-Title": "DaPorkchop_ok",
+        attributes "Implementation-Title": "DaPorkchop_",
                 "Implementation-Version": version,
                 "Main-Class": "net.daporkchop.regionmerger.RegionMerger"
     }
