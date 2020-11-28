@@ -15,6 +15,7 @@
  * OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
  * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
  */
 
 package net.daporkchop.regionmerger.mode;
@@ -40,7 +41,9 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
-import static net.daporkchop.lib.minecraft.world.format.anvil.region.RegionConstants.*;
+import static net.daporkchop.lib.logging.Logging.*;
+import static net.daporkchop.mcworldlib.format.anvil.region.RegionConstants.*;
+import static net.daporkchop.regionmerger.RegionMerger.*;
 
 /**
  * @author DaPorkchop_
@@ -185,7 +188,7 @@ public class Add implements Mode {
                     }
 
                     int chunks = 0;
-                    ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(SECTOR_BYTES * (2 + 32 * 32)).writeBytes(EMPTY_SECTOR).writeBytes(EMPTY_SECTOR);
+                    ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(SECTOR_BYTES * (2 + 32 * 32)).writeBytes(EMPTY_HEADERS);
                     try {
                         int sector = 2;
                         for (int x = 31; x >= 0; x--) {
@@ -200,7 +203,7 @@ public class Add implements Mode {
 
                                         int sizeBytes = region.getInt(chunkPos);
 
-                                        buf.writeBytes(region, chunkPos, sizeBytes + LENGTH_HEADER_SIZE);
+                                        buf.writeBytes(region, chunkPos, sizeBytes + 4);
                                         buf.writeBytes(EMPTY_SECTOR, 0, ((buf.writerIndex() - 1 >> 12) + 1 << 12) - buf.writerIndex()); //pad to next sector
 
                                         int chunkSectors = (buf.writerIndex() - 1 >> 12) + 1;

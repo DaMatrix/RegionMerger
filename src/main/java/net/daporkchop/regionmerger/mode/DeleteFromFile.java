@@ -15,6 +15,7 @@
  * OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
  * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
  */
 
 package net.daporkchop.regionmerger.mode;
@@ -28,6 +29,7 @@ import net.daporkchop.lib.common.function.io.IOConsumer;
 import net.daporkchop.lib.common.util.PorkUtil;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
+import net.daporkchop.lib.unsafe.PUnsafe;
 import net.daporkchop.regionmerger.World;
 import net.daporkchop.regionmerger.option.Arguments;
 
@@ -46,7 +48,9 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
-import static net.daporkchop.lib.minecraft.world.format.anvil.region.RegionConstants.*;
+import static net.daporkchop.lib.logging.Logging.*;
+import static net.daporkchop.mcworldlib.format.anvil.region.RegionConstants.*;
+import static net.daporkchop.regionmerger.RegionMerger.*;
 
 /**
  * @author DaPorkchop_
@@ -136,7 +140,7 @@ public class DeleteFromFile implements Mode {
                                     .mapToInt(chunk -> getOffsetIndex(chunk.getX() & 0x1F, chunk.getY() & 0x1F))
                                     .distinct()
                                     .forEach(index -> headers.putInt(index, 0));
-                            PorkUtil.release(headers.force());
+                            PUnsafe.pork_releaseBuffer(headers.force());
                         }
                     });
 

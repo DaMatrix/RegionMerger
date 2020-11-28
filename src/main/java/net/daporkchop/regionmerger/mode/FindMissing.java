@@ -15,17 +15,16 @@
  * OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
  * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
  */
 
 package net.daporkchop.regionmerger.mode;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.PooledByteBufAllocator;
 import lombok.NonNull;
 import net.daporkchop.lib.common.function.io.IOFunction;
-import net.daporkchop.lib.common.util.PorkUtil;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
+import net.daporkchop.lib.unsafe.PUnsafe;
 import net.daporkchop.regionmerger.World;
 import net.daporkchop.regionmerger.option.Arguments;
 import net.daporkchop.regionmerger.option.Option;
@@ -41,25 +40,25 @@ import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
-import java.util.StringJoiner;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static java.lang.Math.min;
-import static net.daporkchop.lib.minecraft.world.format.anvil.region.RegionConstants.*;
+import static java.lang.Math.*;
+import static net.daporkchop.lib.logging.Logging.*;
+import static net.daporkchop.mcworldlib.format.anvil.region.RegionConstants.*;
 
 /**
  * @author DaPorkchop_
  */
 public class FindMissing implements Mode {
-    protected static final Option.Int  MIN_X     = Option.integer("-minX", Integer.MIN_VALUE, Integer.MIN_VALUE + 1, Integer.MAX_VALUE);
-    protected static final Option.Int  MIN_Z     = Option.integer("-minZ", Integer.MIN_VALUE, Integer.MIN_VALUE + 1, Integer.MAX_VALUE);
-    protected static final Option.Int  MAX_X     = Option.integer("-maxX", Integer.MIN_VALUE, Integer.MIN_VALUE + 1, Integer.MAX_VALUE);
-    protected static final Option.Int  MAX_Z     = Option.integer("-maxZ", Integer.MIN_VALUE, Integer.MIN_VALUE + 1, Integer.MAX_VALUE);
+    protected static final Option.Int MIN_X = Option.integer("-minX", Integer.MIN_VALUE, Integer.MIN_VALUE + 1, Integer.MAX_VALUE);
+    protected static final Option.Int MIN_Z = Option.integer("-minZ", Integer.MIN_VALUE, Integer.MIN_VALUE + 1, Integer.MAX_VALUE);
+    protected static final Option.Int MAX_X = Option.integer("-maxX", Integer.MIN_VALUE, Integer.MIN_VALUE + 1, Integer.MAX_VALUE);
+    protected static final Option.Int MAX_Z = Option.integer("-maxZ", Integer.MIN_VALUE, Integer.MIN_VALUE + 1, Integer.MAX_VALUE);
     protected static final Option.Flag OVERWRITE = Option.flag("o");
 
-    protected static final OpenOption[] REGION_OPEN_OPTIONS             = {StandardOpenOption.READ};
-    protected static final OpenOption[] MISSINGCHUNKS_JSON_OPEN_OPTIONS = {StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING};
+    protected static final OpenOption[] REGION_OPEN_OPTIONS = { StandardOpenOption.READ };
+    protected static final OpenOption[] MISSINGCHUNKS_JSON_OPEN_OPTIONS = { StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING };
 
     @Override
     public void printUsage(@NonNull Logger logger) {
@@ -137,9 +136,9 @@ public class FindMissing implements Mode {
 
                         try {
                             for (World world : sources) {
-                                if (world.regions().contains(regionPos))    {
+                                if (world.regions().contains(regionPos)) {
                                     try (FileChannel channel = FileChannel.open(world.getAsFile(regionPos).toPath(), REGION_OPEN_OPTIONS)) {
-                                        if (channel.size() < SECTOR_BYTES)  {
+                                        if (channel.size() < SECTOR_BYTES) {
                                             continue;
                                         }
                                         buf[bufCount++] = channel.map(FileChannel.MapMode.READ_ONLY, 0L, 4096L);
@@ -174,14 +173,14 @@ public class FindMissing implements Mode {
                             }
                         } finally {
                             while (bufCount-- != 0) {
-                                PorkUtil.release(buf[bufCount]);
+                                PUnsafe.pork_releaseBuffer(buf[bufCount]);
                                 buf[bufCount] = null;
                             }
                         }
                     })
                     .map(v -> String.format("{\"x\":%d,\"z\":%d}", v.getX(), v.getY()))
-                    .collect(() -> new StringJoiner(",\n    ", "[\n    ", "\n]"), StringJoiner::add, StringJoiner::merge)
-                    .toString().getBytes(StandardCharsets.UTF_8);
+                    .collect(Collectors.joining(",\n    ", "[\n    ", "\n]"))
+                    .getBytes(StandardCharsets.UTF_8);
 
             int written = missingChunksJsonChannel.write(ByteBuffer.wrap(json));
             if (written != json.length) {

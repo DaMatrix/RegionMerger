@@ -15,6 +15,7 @@
  * OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
  * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
  */
 
 package net.daporkchop.regionmerger.mode;
@@ -27,6 +28,7 @@ import net.daporkchop.lib.common.function.throwing.ERunnable;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
 import net.daporkchop.lib.unsafe.PUnsafe;
+import net.daporkchop.regionmerger.RegionMerger;
 import net.daporkchop.regionmerger.World;
 import net.daporkchop.regionmerger.option.Arguments;
 import net.daporkchop.regionmerger.option.Option;
@@ -44,7 +46,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static net.daporkchop.lib.minecraft.world.format.anvil.region.RegionConstants.*;
+import static net.daporkchop.lib.logging.Logging.*;
+import static net.daporkchop.mcworldlib.format.anvil.region.RegionConstants.*;
+import static net.daporkchop.regionmerger.RegionMerger.*;
 
 /**
  * @author DaPorkchop_
@@ -173,7 +177,7 @@ public class Merge implements Mode {
                     StringJoiner::merge
             ).toString());
 
-            ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(SECTOR_BYTES * (2 + 32 * 32)).writeBytes(EMPTY_SECTOR).writeBytes(EMPTY_SECTOR);
+            ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(SECTOR_BYTES * (2 + 32 * 32)).writeBytes(EMPTY_HEADERS);
             try {
                 int sector = 2;
                 int chunks = 0;
@@ -190,7 +194,7 @@ public class Merge implements Mode {
 
                                     buf.setInt(offset + SECTOR_BYTES, region.getInt(offset + SECTOR_BYTES)); //copy timestamp
 
-                                    buf.writeBytes(region, chunkPos, sizeBytes + LENGTH_HEADER_SIZE); //copy chunk data
+                                    buf.writeBytes(region, chunkPos, sizeBytes + 4); //copy chunk data
                                     buf.writeBytes(EMPTY_SECTOR, 0, ((buf.writerIndex() - 1 >> 12) + 1 << 12) - buf.writerIndex()); //pad to next sector
 
                                     final int chunkSectors = (buf.writerIndex() - 1 >> 12) + 1; //compute next chunk sector

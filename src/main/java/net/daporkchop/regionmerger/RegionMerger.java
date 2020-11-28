@@ -15,6 +15,7 @@
  * OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
  * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
  */
 
 package net.daporkchop.regionmerger;
@@ -22,6 +23,7 @@ package net.daporkchop.regionmerger;
 import net.daporkchop.lib.logging.LogAmount;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.logging.Logging;
+import net.daporkchop.mcworldlib.format.anvil.region.RegionConstants;
 import net.daporkchop.regionmerger.mode.Add;
 import net.daporkchop.regionmerger.mode.DeleteFromFile;
 import net.daporkchop.regionmerger.mode.FindMissing;
@@ -36,10 +38,15 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
+import static net.daporkchop.lib.logging.Logging.*;
+
 /**
  * @author DaPorkchop_
  */
-public class RegionMerger implements Logging {
+public class RegionMerger {
+    public static final byte[] EMPTY_SECTOR = new byte[RegionConstants.SECTOR_BYTES];
+    public static final byte[] EMPTY_HEADERS = new byte[RegionConstants.HEADER_BYTES];
+
     public static final Map<String, Mode> MODES = new HashMap<String, Mode>() {
         {
             this.put("add", new Add());
@@ -66,7 +73,7 @@ public class RegionMerger implements Logging {
                 "help".equals(args[0])
         ))) {
             Logger log = logger.channel("Help");
-            log.info("RegionMerger v0.1.1")
+            log.info("RegionMerger v0.1.9")
                     .info("  Copyright (c) 2018-2019 DaPorkchop_")
                     .info("")
                     .info("Usage:")
