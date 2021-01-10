@@ -1,7 +1,7 @@
 /*
  * Adapted from The MIT License (MIT)
  *
- * Copyright (c) 2018-2020 DaPorkchop_
+ * Copyright (c) 2018-2021 DaPorkchop_
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation
  * files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy,
@@ -49,11 +49,11 @@ import static net.daporkchop.regionmerger.RegionMerger.*;
  * @author DaPorkchop_
  */
 public class Add implements Mode {
-    protected static final Option.Flag KEEP_EXISTING         = Option.flag("k");
-    protected static final Option.Int  PROGRESS_UPDATE_DELAY = Option.integer("p", 5000, 0, Integer.MAX_VALUE);
+    protected static final Option<Boolean> KEEP_EXISTING = Option.flag("k");
+    protected static final Option<Integer> PROGRESS_UPDATE_DELAY = Option.integer("p", 5000, 0, Integer.MAX_VALUE);
 
-    protected static final OpenOption[] READ_OPEN_OPTIONS  = {StandardOpenOption.READ};
-    protected static final OpenOption[] WRITE_OPEN_OPTIONS = {StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING};
+    protected static final OpenOption[] READ_OPEN_OPTIONS = { StandardOpenOption.READ };
+    protected static final OpenOption[] WRITE_OPEN_OPTIONS = { StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING };
 
     @Override
     public void printUsage(@NonNull Logger logger) {

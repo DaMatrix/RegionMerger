@@ -1,7 +1,7 @@
 /*
  * Adapted from The MIT License (MIT)
  *
- * Copyright (c) 2018-2020 DaPorkchop_
+ * Copyright (c) 2018-2021 DaPorkchop_
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation
  * files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy,
@@ -73,11 +73,11 @@ public class RegionMerger {
                 "help".equals(args[0])
         ))) {
             Logger log = logger.channel("Help");
-            log.info("RegionMerger v0.1.9")
-                    .info("  Copyright (c) 2018-2019 DaPorkchop_")
+            log.info("RegionMerger v0.1.10")
+                    .info("  Copyright (c) 2018-2021 DaPorkchop_")
                     .info("")
                     .info("Usage:")
-                    .info("  java [vm arguments]... -jar regionmerger.jar <mode> [mode arguments]...")
+                    .info("  java [vm arguments]... -jar RegionMerger.jar <mode> [mode arguments]...")
                     .info("")
                     .info("Modes:")
                     .info("  help:")

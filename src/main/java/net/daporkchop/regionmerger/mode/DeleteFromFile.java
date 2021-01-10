@@ -1,7 +1,7 @@
 /*
  * Adapted from The MIT License (MIT)
  *
- * Copyright (c) 2018-2020 DaPorkchop_
+ * Copyright (c) 2018-2021 DaPorkchop_
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation
  * files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy,
@@ -26,7 +26,6 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.PooledByteBufAllocator;
 import lombok.NonNull;
 import net.daporkchop.lib.common.function.io.IOConsumer;
-import net.daporkchop.lib.common.util.PorkUtil;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
 import net.daporkchop.lib.unsafe.PUnsafe;
@@ -50,15 +49,14 @@ import java.util.stream.StreamSupport;
 
 import static net.daporkchop.lib.logging.Logging.*;
 import static net.daporkchop.mcworldlib.format.anvil.region.RegionConstants.*;
-import static net.daporkchop.regionmerger.RegionMerger.*;
 
 /**
  * @author DaPorkchop_
  */
 public class DeleteFromFile implements Mode {
-    protected static final OpenOption[] READ_ONLY_OPEN_OPTIONS    = {StandardOpenOption.READ};
-    protected static final OpenOption[] BACKUP_WRITE_OPEN_OPTIONS = {StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING};
-    protected static final OpenOption[] CHUNK_DELETE_OPEN_OPTIONS = {StandardOpenOption.READ, StandardOpenOption.WRITE};
+    protected static final OpenOption[] READ_ONLY_OPEN_OPTIONS = { StandardOpenOption.READ };
+    protected static final OpenOption[] BACKUP_WRITE_OPEN_OPTIONS = { StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING };
+    protected static final OpenOption[] CHUNK_DELETE_OPEN_OPTIONS = { StandardOpenOption.READ, StandardOpenOption.WRITE };
 
     @Override
     public void printUsage(@NonNull Logger logger) {

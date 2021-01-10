@@ -1,7 +1,7 @@
 /*
  * Adapted from The MIT License (MIT)
  *
- * Copyright (c) 2018-2020 DaPorkchop_
+ * Copyright (c) 2018-2021 DaPorkchop_
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation
  * files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy,
@@ -54,9 +54,9 @@ import static net.daporkchop.regionmerger.RegionMerger.*;
  * @author DaPorkchop_
  */
 public class Optimize implements Mode {
-    protected static final Option.Flag RECOMPRESS = Option.flag("c");
-    protected static final Option.Int LEVEL = Option.integer("l", 7, 0, 8);
-    protected static final Option.Int PROGRESS_UPDATE_DELAY = Option.integer("p", 5000, 0, Integer.MAX_VALUE);
+    protected static final Option<Boolean> RECOMPRESS = Option.flag("c");
+    protected static final Option<Integer> LEVEL = Option.integer("l", Zlib.LEVEL_DEFAULT);
+    protected static final Option<Integer> PROGRESS_UPDATE_DELAY = Option.integer("p", 5000, 0, Integer.MAX_VALUE);
 
     protected static final OpenOption[] INPUT_OPEN_OPTIONS = { StandardOpenOption.READ };
     protected static final OpenOption[] OUTPUT_OPEN_OPTIONS = { StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING };
@@ -74,7 +74,8 @@ public class Optimize implements Mode {
                 .info("    Options:")
                 .info("      -c          Enables re-compression of chunks. This will significantly increase the runtime (and CPU usage), but can help decrease")
                 .info("                  output size further.")
-                .info("      -l <level>  Sets the level (intensity) of the compression, from 0-8. 0 is the worst, 8 is the best. Only effective with -c. Default: 7")
+                .info("      -l <level>  Sets the level (intensity) of the compression, from 0-8. 0 is the worst, 8 is the best. -1 is automatic. Only effective")
+                .info("                  with -c. Default: -1")
                 .info("      -p <time>   Sets the time (in ms) between progress updates. Set to 0 to disable. Default: 5000");
     }
 
@@ -126,7 +127,7 @@ public class Optimize implements Mode {
         } else {
             //simply copy without anything else
             recoder = (src, dst) -> {
-                dst.writeBytes(src);
+                dst.writeInt(src.readableBytes()).writeBytes(src);
                 if (src.isReadable()) {
                     throw new IllegalStateException("Couldn't copy entire chunk into output buffer!");
                 }
@@ -168,13 +169,13 @@ public class Optimize implements Mode {
                         for (int z = 0; z < 32; z++) {
                             try (RawChunk chunk = region.read(x, z)) {
                                 if (chunk != null) { //chunk exists
-                                    dst.setInt(getTimestampIndex(z, z), (int) (chunk.timestamp() / 1000L)); //copy timestamp
+                                    dst.setInt(getTimestampIndex(x, z), (int) (chunk.timestamp() / 1000L)); //copy timestamp
 
                                     recoder.recode(chunk.data(), dst);
                                     dst.writeBytes(EMPTY_SECTOR, 0, ((dst.writerIndex() - 1 >> 12) + 1 << 12) - dst.writerIndex()); //pad to next sector
 
                                     final int chunkSectors = (dst.writerIndex() - 1 >> 12) + 1; //compute next chunk sector
-                                    dst.setInt(getOffsetIndex(z, z), (chunkSectors - sector) | (sector << 8)); //set offset value in region header
+                                    dst.setInt(getOffsetIndex(x, z), (chunkSectors - sector) | (sector << 8)); //set offset value in region header
                                     sector = chunkSectors;
                                     chunks++;
                                 }

@@ -1,7 +1,7 @@
 /*
  * Adapted from The MIT License (MIT)
  *
- * Copyright (c) 2018-2020 DaPorkchop_
+ * Copyright (c) 2018-2021 DaPorkchop_
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation
  * files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy,
@@ -22,6 +22,8 @@ package net.daporkchop.regionmerger.mode;
 
 import lombok.NonNull;
 import net.daporkchop.lib.common.function.io.IOFunction;
+import net.daporkchop.lib.common.misc.file.PFiles;
+import net.daporkchop.lib.common.misc.string.PStrings;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
 import net.daporkchop.lib.unsafe.PUnsafe;
@@ -34,16 +36,19 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.OpenOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.stream.Collector;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static java.lang.Math.*;
+import static net.daporkchop.lib.common.util.PValidation.*;
 import static net.daporkchop.lib.logging.Logging.*;
 import static net.daporkchop.mcworldlib.format.anvil.region.RegionConstants.*;
 
@@ -51,11 +56,13 @@ import static net.daporkchop.mcworldlib.format.anvil.region.RegionConstants.*;
  * @author DaPorkchop_
  */
 public class FindMissing implements Mode {
-    protected static final Option.Int MIN_X = Option.integer("-minX", Integer.MIN_VALUE, Integer.MIN_VALUE + 1, Integer.MAX_VALUE);
-    protected static final Option.Int MIN_Z = Option.integer("-minZ", Integer.MIN_VALUE, Integer.MIN_VALUE + 1, Integer.MAX_VALUE);
-    protected static final Option.Int MAX_X = Option.integer("-maxX", Integer.MIN_VALUE, Integer.MIN_VALUE + 1, Integer.MAX_VALUE);
-    protected static final Option.Int MAX_Z = Option.integer("-maxZ", Integer.MIN_VALUE, Integer.MIN_VALUE + 1, Integer.MAX_VALUE);
-    protected static final Option.Flag OVERWRITE = Option.flag("o");
+    protected static final Option<Integer> MIN_X = Option.integer("-minX", Integer.MIN_VALUE);
+    protected static final Option<Integer> MIN_Z = Option.integer("-minZ", Integer.MIN_VALUE);
+    protected static final Option<Integer> MAX_X = Option.integer("-maxX", Integer.MIN_VALUE);
+    protected static final Option<Integer> MAX_Z = Option.integer("-maxZ", Integer.MIN_VALUE);
+    protected static final Option<Boolean> OVERWRITE = Option.flag("o");
+    protected static final Option<Format> FORMAT = Option.ofEnum("-format", Format.class, Format.MISSINGCHUNKS_JSON);
+    protected static final Option<String> OUTPUT = Option.text("-output", "missingchunks.json");
 
     protected static final OpenOption[] REGION_OPEN_OPTIONS = { StandardOpenOption.READ };
     protected static final OpenOption[] MISSINGCHUNKS_JSON_OPEN_OPTIONS = { StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING };
@@ -63,7 +70,7 @@ public class FindMissing implements Mode {
     @Override
     public void printUsage(@NonNull Logger logger) {
         logger.info("  findmissing:")
-                .info("    Searches for missing chunks within a given area and saves them to a file (missingchunks.json).")
+                .info("    Searches for missing chunks within a given area and saves them to a file.")
                 .info("")
                 .info("    Usage:")
                 .info("      findmissing [options] <paths...>")
@@ -73,12 +80,15 @@ public class FindMissing implements Mode {
                 .info("      --minZ <minZ>       Set the min Z coord to check (in regions) (inclusive)")
                 .info("      --maxX <minX>       Set the max X coord to check (in regions) (inclusive)")
                 .info("      --maxZ <minZ>       Set the max Z coord to check (in regions) (inclusive)")
-                .info("      -o                  Allows overwriting an existing missingchunks.json file.");
+                .info("      --format <format>   Set the output format that will be used. Available options: missingchunks_json, geojson")
+                .info("                          Default: missingchunks_json")
+                .info("      --output <file>     Sets the file that data will be written to. Default: missingchunks.json")
+                .info("      -o                  Allows overwriting an existing output file.");
     }
 
     @Override
     public Arguments arguments() {
-        return new Arguments(false, true, MIN_X, MIN_Z, MAX_X, MAX_Z, OVERWRITE);
+        return new Arguments(false, true, MIN_X, MIN_Z, MAX_X, MAX_Z, OVERWRITE, FORMAT, OUTPUT);
     }
 
     @Override
@@ -88,10 +98,6 @@ public class FindMissing implements Mode {
 
     @Override
     public void run(@NonNull Arguments args) throws IOException {
-        if (false) {
-            throw new UnsupportedOperationException("findmissing mode is currently unimplemented.");
-        }
-
         final List<World> sources = args.getSources();
 
         final int minX = args.get(MIN_X);
@@ -111,14 +117,16 @@ public class FindMissing implements Mode {
         final int deltaX = (maxX + 1) - minX;
         final int deltaZ = (maxZ + 1) - minZ;
 
-        final File missingChunksJson = new File("missingchunks.json");
-        if (missingChunksJson.exists() && !args.get(OVERWRITE)) {
-            throw new IllegalStateException("missingchunks.json already exists (use -o to allow overwriting)");
+        final Format format = args.get(FORMAT);
+
+        final File missingChunksJson = new File(args.get(OUTPUT));
+        if (PFiles.checkFileExists(missingChunksJson) && !args.get(OVERWRITE)) {
+            throw new IllegalStateException(missingChunksJson + " already exists (use -o to allow overwriting)");
         }
-        try (FileChannel missingChunksJsonChannel = FileChannel.open(missingChunksJson.toPath(), MISSINGCHUNKS_JSON_OPEN_OPTIONS)) {
-            if (missingChunksJsonChannel.tryLock() == null) {
-                throw new IllegalStateException("Unable to obtain lock on missingchunks.json!");
-            }
+
+        try (FileChannel missingChunksJsonChannel = FileChannel.open(missingChunksJson.toPath(), MISSINGCHUNKS_JSON_OPEN_OPTIONS);
+             FileLock lock = missingChunksJsonChannel.tryLock()) {
+            checkState(lock != null, "Unable to obtain lock on missingchunks.json!");
 
             Vec2i[] searchPositions = new Vec2i[deltaX * deltaZ];
             for (int x = deltaX - 1; x >= 0; x--) {
@@ -178,8 +186,7 @@ public class FindMissing implements Mode {
                             }
                         }
                     })
-                    .map(v -> String.format("{\"x\":%d,\"z\":%d}", v.getX(), v.getY()))
-                    .collect(Collectors.joining(",\n    ", "[\n    ", "\n]"))
+                    .collect(format.collector())
                     .getBytes(StandardCharsets.UTF_8);
 
             int written = missingChunksJsonChannel.write(ByteBuffer.wrap(json));
@@ -187,5 +194,28 @@ public class FindMissing implements Mode {
                 throw new IllegalStateException(String.format("Only wrote %d/%d bytes!", written, json.length));
             }
         }
+    }
+
+    private enum Format {
+        MISSINGCHUNKS_JSON {
+            @Override
+            Collector<Vec2i, ?, String> collector() {
+                return Collectors.mapping(
+                        pos -> PStrings.fastFormat("{\"x\":%d,\"z\":%d}", pos.getX(), pos.getY()),
+                        Collectors.joining(",\n    ", "[\n    ", "\n]"));
+            }
+        },
+        GEOJSON {
+            @Override
+            Collector<Vec2i, ?, String> collector() {
+                return Collectors.mapping(
+                        pos -> PStrings.fastFormat(
+                                "{\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[%1$d,%2$d]},\"properties\":{\"x\":%1$d,\"z\":%2$d}}",
+                                pos.getX(), pos.getY()),
+                        Collectors.joining(",", "{\"type\":\"FeatureCollection\",\"features\":[", "]}"));
+            }
+        };
+
+        abstract Collector<Vec2i, ?, String> collector();
     }
 }

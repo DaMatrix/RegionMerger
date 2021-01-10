@@ -1,7 +1,7 @@
 /*
  * Adapted from The MIT License (MIT)
  *
- * Copyright (c) 2018-2020 DaPorkchop_
+ * Copyright (c) 2018-2021 DaPorkchop_
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation
  * files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy,
@@ -28,7 +28,6 @@ import net.daporkchop.lib.common.function.throwing.ERunnable;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
 import net.daporkchop.lib.unsafe.PUnsafe;
-import net.daporkchop.regionmerger.RegionMerger;
 import net.daporkchop.regionmerger.World;
 import net.daporkchop.regionmerger.option.Arguments;
 import net.daporkchop.regionmerger.option.Option;
@@ -54,10 +53,10 @@ import static net.daporkchop.regionmerger.RegionMerger.*;
  * @author DaPorkchop_
  */
 public class Merge implements Mode {
-    protected static final Option.Int PROGRESS_UPDATE_DELAY = Option.integer("p", 5000, 0, Integer.MAX_VALUE);
+    protected static final Option<Integer> PROGRESS_UPDATE_DELAY = Option.integer("p", 5000, 0, Integer.MAX_VALUE);
 
-    protected static final OpenOption[] READ_OPEN_OPTIONS  = {StandardOpenOption.READ};
-    protected static final OpenOption[] WRITE_OPEN_OPTIONS = {StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW};
+    protected static final OpenOption[] READ_OPEN_OPTIONS = { StandardOpenOption.READ };
+    protected static final OpenOption[] WRITE_OPEN_OPTIONS = { StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW };
 
     @Override
     public void printUsage(@NonNull Logger logger) {
@@ -203,7 +202,7 @@ public class Merge implements Mode {
                                     chunks++;
                                     break;
                                 }
-                            } catch (IndexOutOfBoundsException e)   {
+                            } catch (IndexOutOfBoundsException e) {
                                 StringJoiner joiner = new StringJoiner("\n");
                                 Logger.getStackTrace(e, joiner::add);
                                 //i belive this is caused by corruption
@@ -225,7 +224,7 @@ public class Merge implements Mode {
                     logger.warn("Found no input chunks for region (%d,%d)", pos.getX(), pos.getY());
                 }
                 remainingRegions.getAndDecrement();
-            } catch (Exception e)   {
+            } catch (Exception e) {
                 logger.alert("%s\n\nWhile processing region (%d,%d)", e, pos.getX(), pos.getY());
                 PUnsafe.throwException(e);
             } finally {
