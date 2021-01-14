@@ -52,6 +52,7 @@ public class RegionMerger {
             this.put("add", new Add());
             this.put("findmissing", new FindMissing());
             this.put("merge", new Merge());
+            this.put("map", new net.daporkchop.regionmerger.mode.Map());
             this.put("optimize", new Optimize());
 
             this.put("debug-deletefromfile", new DeleteFromFile());
