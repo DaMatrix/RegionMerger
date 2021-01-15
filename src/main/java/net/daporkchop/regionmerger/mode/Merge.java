@@ -94,7 +94,6 @@ public class Merge implements Mode {
         Collection<Vec2i> regionPositions = sources.stream()
                 .map(World::regions)
                 .flatMap(Collection::stream)
-                .distinct()
                 .collect(Collectors.toSet());
 
         logger.info("Loaded %d input worlds with a total of %d distinct regions.", sources.size(), regionPositions.size());
@@ -126,13 +125,6 @@ public class Merge implements Mode {
         ThreadLocal<ByteBuf[]> REGIONS_CACHE = ThreadLocal.withInitial(() -> new ByteBuf[sources.size()]);
         ThreadLocal<List<String>> FILENAMES_CACHE = ThreadLocal.withInitial(ArrayList::new);
         regionPositions.parallelStream().forEach((IOConsumer<Vec2i>) pos -> {
-            /*List<OverclockedRegionFile> regions = new LinkedList<>();
-            for (int i = 0; i < sources.size(); i++) {
-                World world = sources.get(i);
-                if (world.regions().contains(pos)) {
-                    regions.add(new OverclockedRegionFile(world.getAsFile(pos), true, false));
-                }
-            }*/
             ByteBuf[] regions = REGIONS_CACHE.get();
             List<String> filenames = FILENAMES_CACHE.get();
             filenames.clear();

@@ -27,6 +27,7 @@ import net.daporkchop.lib.common.function.io.IOConsumer;
 import net.daporkchop.lib.common.function.throwing.ERunnable;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
+import net.daporkchop.regionmerger.Sort;
 import net.daporkchop.regionmerger.World;
 import net.daporkchop.regionmerger.option.Arguments;
 import net.daporkchop.regionmerger.option.Option;
@@ -52,8 +53,8 @@ import static net.daporkchop.regionmerger.RegionMerger.*;
  * @author DaPorkchop_
  */
 public class Add implements Mode {
-    protected static final Option<Boolean> KEEP_EXISTING = Option.flag("k");
     protected static final Option<Integer> PROGRESS_UPDATE_DELAY = Option.integer("p", 5000, 0, Integer.MAX_VALUE);
+    protected static final Option<Sort> SORT = Option.ofEnum("-sort", Sort.class, Sort.YOUNGEST);
 
     protected static final OpenOption[] READ_OPEN_OPTIONS = { StandardOpenOption.READ };
     protected static final OpenOption[] WRITE_OPEN_OPTIONS = { StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING };
@@ -69,15 +70,14 @@ public class Add implements Mode {
                 .info("      add [options] <destination> <source> [source]...")
                 .info("")
                 .info("    Options:")
-                .info("      -k          Prevents overwriting existing chunks in the destination world.")
-                .info("      -t          Uses an alternative merging algorithm can be significantly faster, but may cause issues with corruption. Make")
-                .info("                  sure to take backups when using this!")
-                .info("      -p <time>   Sets the time (in ms) between progress updates. Set to 0 to disable. Default: 5000");
+                .info("      --sort <sort>  Sets the algorithm used to sort individual chunks when multiple candidates exist.")
+                .info("                     Options: youngest, oldest, input_order. Default: youngest")
+                .info("      -p <time>      Sets the time (in ms) between progress updates. Set to 0 to disable. Default: 5000");
     }
 
     @Override
     public Arguments arguments() {
-        return new Arguments(true, true, KEEP_EXISTING, PROGRESS_UPDATE_DELAY);
+        return new Arguments(true, true, SORT, PROGRESS_UPDATE_DELAY);
     }
 
     @Override
@@ -90,12 +90,7 @@ public class Add implements Mode {
         final World dst = args.getDestination();
         final List<World> sources = args.getSources();
 
-        final boolean keepExisting = args.get(KEEP_EXISTING);
-
-        if (keepExisting) {
-            logger.error("-k is not currently implemented!");
-            System.exit(1);
-        }
+        final Sort sort = args.get(SORT);
 
         Collection<Vec2i> regionPositions = sources.stream()
                 .map(World::regions)
@@ -198,25 +193,23 @@ public class Add implements Mode {
                             int sector = 2;
                             for (int x = 0; x < 32; x++) {
                                 for (int z = 0; z < 32; z++) {
-                                    final int offset = getOffsetIndex(x, z);
-                                    final int timestamp = getTimestampIndex(x, z);
-                                    Optional<ByteBuf> optionalRegion = Arrays.stream(regions, 0, regionsCount)
-                                            .filter(region -> region.getInt(offset) != 0)
-                                            .max(Comparator.comparingInt(region -> region.getInt(timestamp)));
+                                    ByteBuf region = sort.select(regions, regionsCount, x, z);
 
-                                    if (optionalRegion.isPresent()) {
-                                        ByteBuf region = optionalRegion.get();
-                                        int chunkOffset = region.getInt(offset);
+                                    if (region != null) {
+                                        final int offsetIndex = getOffsetIndex(x, z);
+                                        final int timestampIndex = getTimestampIndex(x, z);
+
+                                        int chunkOffset = region.getInt(offsetIndex);
                                         final int chunkPos = (chunkOffset >>> 8) * SECTOR_BYTES;
                                         final int sizeBytes = region.getInt(chunkPos);
 
-                                        buf.setInt(timestamp, region.getInt(timestamp)); //copy timestamp
+                                        buf.setInt(timestampIndex, region.getInt(timestampIndex)); //copy timestamp
 
                                         buf.writeBytes(region, chunkPos, sizeBytes + 4);
                                         buf.writeBytes(EMPTY_SECTOR, 0, ((buf.writerIndex() - 1 >> 12) + 1 << 12) - buf.writerIndex()); //pad to next sector
 
                                         final int chunkSectors = (buf.writerIndex() - 1 >> 12) + 1; //compute next chunk sector
-                                        buf.setInt(offset, (chunkSectors - sector) | (sector << 8)); //set offset value in region header
+                                        buf.setInt(offsetIndex, (chunkSectors - sector) | (sector << 8)); //set offset value in region header
                                         sector = chunkSectors;
                                         chunks++;
                                     }
