@@ -180,33 +180,26 @@ public class Merge implements Mode {
             try {
                 int sector = 2;
                 int chunks = 0;
-                for (int x = 31; x >= 0; x--) {
-                    for (int z = 31; z >= 0; z--) {
+                for (int x = 0; x < 32; x++) {
+                    for (int z = 0; z < 32; z++) {
                         final int offset = getOffsetIndex(x, z);
                         for (int i = 0; i < regionsCount; i++) {
-                            try {
-                                ByteBuf region = regions[i];
-                                final int chunkOffset = region.getInt(offset);
-                                if (chunkOffset != 0) {
-                                    final int chunkPos = (chunkOffset >>> 8) * SECTOR_BYTES;
-                                    final int sizeBytes = region.getInt(chunkPos);
+                            ByteBuf region = regions[i];
+                            final int chunkOffset = region.getInt(offset);
+                            if (chunkOffset != 0) {
+                                final int chunkPos = (chunkOffset >>> 8) * SECTOR_BYTES;
+                                final int sizeBytes = region.getInt(chunkPos);
 
-                                    buf.setInt(offset + SECTOR_BYTES, region.getInt(offset + SECTOR_BYTES)); //copy timestamp
+                                buf.setInt(offset + SECTOR_BYTES, region.getInt(offset + SECTOR_BYTES)); //copy timestamp
 
-                                    buf.writeBytes(region, chunkPos, sizeBytes + 4); //copy chunk data
-                                    buf.writeBytes(EMPTY_SECTOR, 0, ((buf.writerIndex() - 1 >> 12) + 1 << 12) - buf.writerIndex()); //pad to next sector
+                                buf.writeBytes(region, chunkPos, sizeBytes + 4); //copy chunk data
+                                buf.writeBytes(EMPTY_SECTOR, 0, ((buf.writerIndex() - 1 >> 12) + 1 << 12) - buf.writerIndex()); //pad to next sector
 
-                                    final int chunkSectors = (buf.writerIndex() - 1 >> 12) + 1; //compute next chunk sector
-                                    buf.setInt(offset, (chunkSectors - sector) | (sector << 8)); //set offset value in region header
-                                    sector = chunkSectors;
-                                    chunks++;
-                                    break;
-                                }
-                            } catch (IndexOutOfBoundsException e) {
-                                StringJoiner joiner = new StringJoiner("\n");
-                                Logger.getStackTrace(e, joiner::add);
-                                //i belive this is caused by corruption
-                                logger.alert("%s\n\nThis is most likely caused by corruption!\n\nCaused at (%d,%d) in (%d,%d): \"%s\"", joiner, x, z, pos.getX(), pos.getY(), filenames.get(i));
+                                final int chunkSectors = (buf.writerIndex() - 1 >> 12) + 1; //compute next chunk sector
+                                buf.setInt(offset, (chunkSectors - sector) | (sector << 8)); //set offset value in region header
+                                sector = chunkSectors;
+                                chunks++;
+                                break;
                             }
                         }
                     }

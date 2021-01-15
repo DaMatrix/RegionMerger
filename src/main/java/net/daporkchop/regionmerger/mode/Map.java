@@ -40,6 +40,7 @@ import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.file.OpenOption;
 import java.nio.file.StandardOpenOption;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.IntSummaryStatistics;
 import java.util.List;
@@ -117,95 +118,82 @@ public class Map implements Mode {
 
         ThreadLocal<int[]> pixelBuffer = ThreadLocal.withInitial(() -> new int[32 * 32]);
 
-        for (int pass = 0; pass < type.passes; pass++) {
-            int _pass = pass;
-            regionPositions.stream().parallel()
-                    .forEach((IOConsumer<Vec2i>) pos -> {
-                        ByteBuf headers = null;
-                        try {
-                            try (FileChannel channel = FileChannel.open(world.getAsFile(pos).toPath(), READ_OPEN_OPTIONS)) {
-                                int size = Math.min(type.maxDataSize, toInt(channel.size()));
-                                headers = ByteBufAllocator.DEFAULT.ioBuffer(size, size);
-                                do {
-                                    int writerIndex = headers.writerIndex();
-                                    headers.writeBytes(channel, writerIndex, size - writerIndex);
-                                } while (headers.readableBytes() < size);
-                            }
-                            type.region(_pass, image, headers, pos.getX(), pos.getY(), (pos.getX() - minX) << 5, (pos.getY() - minZ) << 5, pixelBuffer.get());
-                        } finally {
-                            ReferenceCountUtil.release(headers);
+        regionPositions.stream().parallel()
+                .forEach((IOConsumer<Vec2i>) pos -> {
+                    ByteBuf headers = null;
+                    try {
+                        try (FileChannel channel = FileChannel.open(world.getAsFile(pos).toPath(), READ_OPEN_OPTIONS)) {
+                            int size = Math.min(type.maxDataSize, toInt(channel.size()));
+                            headers = ByteBufAllocator.DEFAULT.ioBuffer(size, size);
+                            do {
+                                int writerIndex = headers.writerIndex();
+                                headers.writeBytes(channel, writerIndex, size - writerIndex);
+                            } while (headers.readableBytes() < size);
                         }
-                    });
-            logger.info("Completed pass #%d", pass);
-        }
+                        type.region(image, headers, pos.getX(), pos.getY(), (pos.getX() - minX) << 5, (pos.getY() - minZ) << 5, pixelBuffer.get());
+                    } finally {
+                        ReferenceCountUtil.release(headers);
+                    }
+                });
 
         logger.info("Writing image...");
+        type.finish(image);
         ImageIO.write(image, "png", imageFile);
     }
 
     @RequiredArgsConstructor
     enum Type {
-        AGE(2, 8192) {
-            int minAge = Integer.MAX_VALUE;
-            int maxAge = Integer.MIN_VALUE;
+        AGE(8192) {
+            int[] values;
+            int sizeX;
+            int sizeZ;
 
             @Override
             BufferedImage createImage(int sizeX, int sizeZ) {
+                Arrays.fill(this.values = new int[sizeX * sizeZ], -1);
+                this.sizeX = sizeX;
+                this.sizeZ = sizeZ;
                 return new BufferedImage(sizeX, sizeZ, BufferedImage.TYPE_INT_RGB);
             }
 
             @Override
-            void region(int pass, BufferedImage image, ByteBuf buffer, int rx, int rz, int px, int pz, int[] pixelBuffer) throws IOException {
-                switch (pass) {
-                    case 0: {
-                        int minAge = Integer.MAX_VALUE;
-                        int maxAge = Integer.MIN_VALUE;
-
-                        for (int x = 0; x < 32; x++) {
-                            for (int z = 0; z < 32; z++) {
-                                if (buffer.getInt(getOffsetIndex(x, z)) != 0) {
-                                    int age = buffer.getInt(getTimestampIndex(x, z));
-                                    minAge = Math.min(minAge, age);
-                                    maxAge = Math.max(maxAge, age);
-                                }
-                            }
+            void region(BufferedImage image, ByteBuf buffer, int rx, int rz, int px, int pz, int[] pixelBuffer) throws IOException {
+                for (int z = 0; z < 32; z++) {
+                    for (int x = 0; x < 32; x++) {
+                        if (buffer.getInt(getOffsetIndex(x, z)) != 0) {
+                            this.values[(pz + z) * this.sizeX + (px + x)] = buffer.getInt(getTimestampIndex(x, z));
                         }
-
-                        synchronized (this) {
-                            this.minAge = Math.min(this.minAge, minAge);
-                            this.maxAge = Math.max(this.maxAge, maxAge);
-                        }
-                        break;
-                    }
-                    case 1: {
-                        for (int x = 0; x < 32; x++) {
-                            for (int z = 0; z < 32; z++) {
-                                int color = 0xFF000000;
-                                if (buffer.getInt(getOffsetIndex(x, z)) != 0) {
-                                    int age = buffer.getInt(getTimestampIndex(x, z));
-                                    int i = clamp(floorI((double) (age - this.minAge) * 511.0d / (this.maxAge - this.minAge)), 0, 511);
-                                    color |= (clamp(511 - i, 0, 255) << 16) | (clamp(i, 0, 255) << 8);
-                                }
-                                pixelBuffer[z * 32 + x] = color;
-                            }
-                        }
-
-                        synchronized (image) {
-                            image.setRGB(px, pz, 32, 32, pixelBuffer, 0, 32);
-                        }
-                        break;
                     }
                 }
             }
+
+            @Override
+            void finish(BufferedImage image) {
+                IntSummaryStatistics stats = Arrays.stream(this.values).filter(i -> i >= 0).summaryStatistics();
+                int min = stats.getMin();
+                int max = stats.getMax();
+
+                for (int i = 0; i < this.values.length; i++) {
+                    int color = 0xFF000000;
+                    int value = this.values[i];
+                    if (value >= 0) {
+                        int v = clamp(floorI((double) (value - min) * 511.0d / (max - min)), 0, 511);
+                        color |= (clamp(511 - v, 0, 255) << 16) | (clamp(v, 0, 255) << 8);
+                    }
+                    this.values[i] = color;
+                }
+
+                image.setRGB(0, 0, this.sizeX, this.sizeZ, this.values, 0, this.sizeX);
+            }
         },
-        EXISTS(1, 4096) {
+        EXISTS(4096) {
             @Override
             BufferedImage createImage(int sizeX, int sizeZ) {
                 return new BufferedImage(sizeX, sizeZ, BufferedImage.TYPE_BYTE_BINARY);
             }
 
             @Override
-            void region(int pass, BufferedImage image, ByteBuf buffer, int rx, int rz, int px, int pz, int[] pixelBuffer) throws IOException {
+            void region(BufferedImage image, ByteBuf buffer, int rx, int rz, int px, int pz, int[] pixelBuffer) throws IOException {
                 for (int x = 0; x < 32; x++) {
                     for (int z = 0; z < 32; z++) {
                         pixelBuffer[z * 32 + x] = buffer.getInt(getOffsetIndex(x, z)) == 0 ? 0xFF000000 : 0xFFFFFFFF;
@@ -217,124 +205,102 @@ public class Map implements Mode {
                 }
             }
         },
-        SIZE(2, Integer.MAX_VALUE) {
-            int minSize = Integer.MAX_VALUE;
-            int maxSize = Integer.MIN_VALUE;
+        SIZE(Integer.MAX_VALUE) {
+            int[] values;
+            int sizeX;
+            int sizeZ;
 
             @Override
             BufferedImage createImage(int sizeX, int sizeZ) {
+                Arrays.fill(this.values = new int[sizeX * sizeZ], -1);
+                this.sizeX = sizeX;
+                this.sizeZ = sizeZ;
                 return new BufferedImage(sizeX, sizeZ, BufferedImage.TYPE_INT_RGB);
             }
 
             @Override
-            void region(int pass, BufferedImage image, ByteBuf buffer, int rx, int rz, int px, int pz, int[] pixelBuffer) throws IOException {
-                switch (pass) {
-                    case 0: {
-                        int minSize = Integer.MAX_VALUE;
-                        int maxSize = Integer.MIN_VALUE;
-
-                        for (int x = 0; x < 32; x++) {
-                            for (int z = 0; z < 32; z++) {
-                                int offset = buffer.getInt(getOffsetIndex(x, z));
-                                if (offset != 0) {
-                                    int size = buffer.getInt((offset >> 8) * SECTOR_BYTES);
-                                    minSize = Math.min(minSize, size);
-                                    maxSize = Math.max(maxSize, size);
-                                }
-                            }
+            void region(BufferedImage image, ByteBuf buffer, int rx, int rz, int px, int pz, int[] pixelBuffer) throws IOException {
+                for (int z = 0; z < 32; z++) {
+                    for (int x = 0; x < 32; x++) {
+                        int offset = buffer.getInt(getOffsetIndex(x, z));
+                        if (offset != 0) {
+                            this.values[(pz + z) * this.sizeX + (px + x)] = buffer.getInt((offset >> 8) * SECTOR_BYTES);
                         }
-
-                        synchronized (this) {
-                            this.minSize = Math.min(this.minSize, minSize);
-                            this.maxSize = Math.max(this.maxSize, maxSize);
-                        }
-                        break;
-                    }
-                    case 1: {
-                        for (int x = 0; x < 32; x++) {
-                            for (int z = 0; z < 32; z++) {
-                                int color = 0xFF000000;
-
-                                int offset = buffer.getInt(getOffsetIndex(x, z));
-                                if (offset != 0) {
-                                    int size = buffer.getInt((offset >> 8) * SECTOR_BYTES);
-                                    int i = clamp(floorI((double) (size - this.minSize) * 511.0d / (this.maxSize - this.minSize)), 0, 511);
-                                    color |= (clamp(511 - i, 0, 255) << 16) | (clamp(i, 0, 255) << 8);
-                                }
-                                pixelBuffer[z * 32 + x] = color;
-                            }
-                        }
-
-                        synchronized (image) {
-                            image.setRGB(px, pz, 32, 32, pixelBuffer, 0, 32);
-                        }
-                        break;
                     }
                 }
+            }
+
+            @Override
+            void finish(BufferedImage image) {
+                IntSummaryStatistics stats = Arrays.stream(this.values).filter(i -> i >= 0).summaryStatistics();
+                int min = stats.getMin();
+                int max = stats.getMax();
+
+                for (int i = 0; i < this.values.length; i++) {
+                    int color = 0xFF000000;
+                    int value = this.values[i];
+                    if (value >= 0) {
+                        int v = clamp(floorI((double) (value - min) * 511.0d / (max - min)), 0, 511);
+                        color |= (clamp(511 - v, 0, 255) << 16) | (clamp(v, 0, 255) << 8);
+                    }
+                    this.values[i] = color;
+                }
+
+                image.setRGB(0, 0, this.sizeX, this.sizeZ, this.values, 0, this.sizeX);
             }
         },
-        SIZE_FAST(2, 4096) {
-            int minSize = Integer.MAX_VALUE;
-            int maxSize = Integer.MIN_VALUE;
+        SIZE_FAST(4096) {
+            int[] values;
+            int sizeX;
+            int sizeZ;
 
             @Override
             BufferedImage createImage(int sizeX, int sizeZ) {
+                Arrays.fill(this.values = new int[sizeX * sizeZ], -1);
+                this.sizeX = sizeX;
+                this.sizeZ = sizeZ;
                 return new BufferedImage(sizeX, sizeZ, BufferedImage.TYPE_INT_RGB);
             }
 
             @Override
-            void region(int pass, BufferedImage image, ByteBuf buffer, int rx, int rz, int px, int pz, int[] pixelBuffer) throws IOException {
-                switch (pass) {
-                    case 0: {
-                        int minSize = Integer.MAX_VALUE;
-                        int maxSize = Integer.MIN_VALUE;
-
-                        for (int x = 0; x < 32; x++) {
-                            for (int z = 0; z < 32; z++) {
-                                int offset = buffer.getInt(getOffsetIndex(x, z));
-                                if (offset != 0) {
-                                    int size = (offset & 0xFF) * SECTOR_BYTES;
-                                    minSize = Math.min(minSize, size);
-                                    maxSize = Math.max(maxSize, size);
-                                }
-                            }
+            void region(BufferedImage image, ByteBuf buffer, int rx, int rz, int px, int pz, int[] pixelBuffer) throws IOException {
+                for (int z = 0; z < 32; z++) {
+                    for (int x = 0; x < 32; x++) {
+                        int offset = buffer.getInt(getOffsetIndex(x, z));
+                        if (offset != 0) {
+                            this.values[(pz + z) * this.sizeX + (px + x)] = (offset & 0xFF) * SECTOR_BYTES;
                         }
-
-                        synchronized (this) {
-                            this.minSize = Math.min(this.minSize, minSize);
-                            this.maxSize = Math.max(this.maxSize, maxSize);
-                        }
-                        break;
-                    }
-                    case 1: {
-                        for (int x = 0; x < 32; x++) {
-                            for (int z = 0; z < 32; z++) {
-                                int color = 0xFF000000;
-
-                                int offset = buffer.getInt(getOffsetIndex(x, z));
-                                if (offset != 0) {
-                                    int size = (offset & 0xFF) * SECTOR_BYTES;
-                                    int i = clamp(floorI((double) (size - this.minSize) * 511.0d / (this.maxSize - this.minSize)), 0, 511);
-                                    color |= (clamp(511 - i, 0, 255) << 16) | (clamp(i, 0, 255) << 8);
-                                }
-                                pixelBuffer[z * 32 + x] = color;
-                            }
-                        }
-
-                        synchronized (image) {
-                            image.setRGB(px, pz, 32, 32, pixelBuffer, 0, 32);
-                        }
-                        break;
                     }
                 }
+            }
+
+            @Override
+            void finish(BufferedImage image) {
+                IntSummaryStatistics stats = Arrays.stream(this.values).filter(i -> i >= 0).summaryStatistics();
+                int min = stats.getMin();
+                int max = stats.getMax();
+
+                for (int i = 0; i < this.values.length; i++) {
+                    int color = 0xFF000000;
+                    int value = this.values[i];
+                    if (value >= 0) {
+                        int v = clamp(floorI((double) (value - min) * 511.0d / (max - min)), 0, 511);
+                        color |= (clamp(511 - v, 0, 255) << 16) | (clamp(v, 0, 255) << 8);
+                    }
+                    this.values[i] = color;
+                }
+
+                image.setRGB(0, 0, this.sizeX, this.sizeZ, this.values, 0, this.sizeX);
             }
         };
 
-        private final int passes;
         private final int maxDataSize;
 
         abstract BufferedImage createImage(int sizeX, int sizeZ);
 
-        abstract void region(int pass, BufferedImage image, ByteBuf buffer, int rx, int rz, int px, int pz, int[] pixelBuffer) throws IOException;
+        abstract void region(BufferedImage image, ByteBuf buffer, int rx, int rz, int px, int pz, int[] pixelBuffer) throws IOException;
+
+        void finish(BufferedImage image) {
+        }
     }
 }

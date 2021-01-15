@@ -36,8 +36,11 @@ import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.file.OpenOption;
 import java.nio.file.StandardOpenOption;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
@@ -97,7 +100,6 @@ public class Add implements Mode {
         Collection<Vec2i> regionPositions = sources.stream()
                 .map(World::regions)
                 .flatMap(Collection::stream)
-                .distinct()
                 .collect(Collectors.toSet());
 
         logger.info("Loaded output world with %d existing regions.", dst.regions().size());
@@ -139,6 +141,8 @@ public class Add implements Mode {
                             long size = channel.size();
                             if (size > Integer.MAX_VALUE) {
                                 throw new IllegalStateException(String.format("Region too big: %s (%d bytes)", dst.getAsFile(pos).getAbsolutePath(), size));
+                            } else if (size < HEADER_BYTES) {
+                                throw new IllegalStateException(String.format("Region too small: %s (%d bytes)", dst.getAsFile(pos).getAbsolutePath(), size));
                             }
                             buf = PooledByteBufAllocator.DEFAULT.ioBuffer((int) size);
                             int cnt = buf.writeBytes(channel, (int) size);
@@ -190,51 +194,54 @@ public class Add implements Mode {
                     int chunks = 0;
                     ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(SECTOR_BYTES * (2 + 32 * 32)).writeBytes(EMPTY_HEADERS);
                     try {
-                        int sector = 2;
-                        for (int x = 31; x >= 0; x--) {
-                            for (int z = 31; z >= 0; z--) {
-                                int offset = getOffsetIndex(x, z);
-                                for (int i = 0; i < regionsCount; i++) {
-                                    ByteBuf region = regions[i];
-                                    int chunkOffset = region.getInt(offset);
-                                    if (chunkOffset != 0) {
-                                        int chunkPos = (chunkOffset >> 8) * SECTOR_BYTES;
-                                        //int chunkSectors = chunkOffset & 0xFF;
+                        try {
+                            int sector = 2;
+                            for (int x = 0; x < 32; x++) {
+                                for (int z = 0; z < 32; z++) {
+                                    final int offset = getOffsetIndex(x, z);
+                                    final int timestamp = getTimestampIndex(x, z);
+                                    Optional<ByteBuf> optionalRegion = Arrays.stream(regions, 0, regionsCount)
+                                            .filter(region -> region.getInt(offset) != 0)
+                                            .max(Comparator.comparingInt(region -> region.getInt(timestamp)));
 
-                                        int sizeBytes = region.getInt(chunkPos);
+                                    if (optionalRegion.isPresent()) {
+                                        ByteBuf region = optionalRegion.get();
+                                        int chunkOffset = region.getInt(offset);
+                                        final int chunkPos = (chunkOffset >>> 8) * SECTOR_BYTES;
+                                        final int sizeBytes = region.getInt(chunkPos);
+
+                                        buf.setInt(timestamp, region.getInt(timestamp)); //copy timestamp
 
                                         buf.writeBytes(region, chunkPos, sizeBytes + 4);
                                         buf.writeBytes(EMPTY_SECTOR, 0, ((buf.writerIndex() - 1 >> 12) + 1 << 12) - buf.writerIndex()); //pad to next sector
 
-                                        int chunkSectors = (buf.writerIndex() - 1 >> 12) + 1;
-
-                                        buf.setInt(offset, (chunkSectors - sector) | (sector << 8));
-                                        buf.setInt(offset + SECTOR_BYTES, region.getInt(offset + SECTOR_BYTES));
+                                        final int chunkSectors = (buf.writerIndex() - 1 >> 12) + 1; //compute next chunk sector
+                                        buf.setInt(offset, (chunkSectors - sector) | (sector << 8)); //set offset value in region header
                                         sector = chunkSectors;
                                         chunks++;
-                                        break;
                                     }
                                 }
                             }
+                        } finally {
+                            while (--regionsCount >= 0) {
+                                regions[regionsCount].release();
+                                regions[regionsCount] = null;
+                            }
+                        }
+                        if (chunks > 0) {
+                            try (FileChannel channel = FileChannel.open(dstFile.toPath(), WRITE_OPEN_OPTIONS)) {
+                                int writeable = buf.readableBytes();
+                                int written = buf.readBytes(channel, writeable);
+                                if (writeable != written) {
+                                    throw new IllegalStateException(String.format("Only wrote %d/%d bytes!", written, writeable));
+                                }
+                            }
+                            totalChunks.getAndAdd(chunks);
+                        } else {
+                            logger.warn("Found no input chunks for region (%d,%d)", pos.getX(), pos.getY());
                         }
                     } finally {
                         buf.release();
-                        while (--regionsCount >= 0) {
-                            regions[regionsCount].release();
-                            regions[regionsCount] = null;
-                        }
-                    }
-                    if (chunks > 0) {
-                        try (FileChannel channel = FileChannel.open(dstFile.toPath(), WRITE_OPEN_OPTIONS)) {
-                            int writeable = buf.readableBytes();
-                            int written = buf.readBytes(channel, writeable);
-                            if (writeable != written) {
-                                throw new IllegalStateException(String.format("Only wrote %d/%d bytes!", written, writeable));
-                            }
-                        }
-                        totalChunks.getAndAdd(chunks);
-                    } else {
-                        logger.warn("Found no input chunks for region (%d,%d)", pos.getX(), pos.getY());
                     }
                     remainingRegions.getAndDecrement();
                 });
