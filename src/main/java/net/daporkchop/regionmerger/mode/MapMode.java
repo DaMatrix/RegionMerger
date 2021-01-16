@@ -26,6 +26,7 @@ import io.netty.util.ReferenceCountUtil;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import net.daporkchop.lib.common.function.io.IOConsumer;
+import net.daporkchop.lib.common.function.throwing.ERunnable;
 import net.daporkchop.lib.common.misc.file.PFiles;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
@@ -44,6 +45,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.IntSummaryStatistics;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static net.daporkchop.lib.common.math.PMath.*;
 import static net.daporkchop.lib.common.util.PValidation.*;
@@ -56,6 +58,7 @@ import static net.daporkchop.mcworldlib.format.anvil.region.RegionConstants.*;
  * @author DaPorkchop_
  */
 public class MapMode implements Mode {
+    protected static final Option<Integer> PROGRESS_UPDATE_DELAY = Option.integer("p", 5000, 0, Integer.MAX_VALUE);
     protected static final Option<Type> TYPE = Option.ofEnum("-type", Type.class, null);
     protected static final Option<String> OUTPUT = Option.text("-output", "map.png");
     protected static final Option<Boolean> OVERWRITE = Option.flag("o");
@@ -71,14 +74,15 @@ public class MapMode implements Mode {
                 .info("      merge [options] <source>")
                 .info("")
                 .info("    Options:")
-                .info("      --type <type>       Sets the type of map that will be created. Options: age, exists, size, size_fast")
-                .info("      --output <file>     Sets the file that the map will be written to. Default: map.png")
-                .info("      -o                  Allows overwriting an existing output file.");
+                .info("      --type <type>    Sets the type of map that will be created. Options: age, exists, size, size_fast")
+                .info("      --output <file>  Sets the file that the map will be written to. Default: map.png")
+                .info("      -o               Allows overwriting an existing output file.")
+                .info("      -p <time>        Sets the time (in ms) between progress updates. Set to 0 to disable. Default: 5000");
     }
 
     @Override
     public Arguments arguments() {
-        return new Arguments(false, true, TYPE, OUTPUT, OVERWRITE);
+        return new Arguments(false, true, TYPE, OUTPUT, OVERWRITE, PROGRESS_UPDATE_DELAY);
     }
 
     @Override
@@ -114,9 +118,32 @@ public class MapMode implements Mode {
         final int sizeX = xs.getMax() - xs.getMin() + 1;
         final int sizeZ = zs.getMax() - zs.getMin() + 1;
 
+        logger.info("Creating %dx%d image buffer...", sizeX << 5, sizeZ << 5);
         BufferedImage image = type.createImage(sizeX << 5, sizeZ << 5);
 
         ThreadLocal<int[]> pixelBuffer = ThreadLocal.withInitial(() -> new int[32 * 32]);
+
+        AtomicLong remainingRegions = new AtomicLong(regionPositions.size());
+
+        {
+            final int delay = args.get(PROGRESS_UPDATE_DELAY);
+            if (delay > 0) {
+                Thread t = new Thread((ERunnable) () -> {
+                    Logger channel = logger.channel("Progress");
+                    int total = regionPositions.size();
+                    while (true) {
+                        Thread.sleep(delay);
+                        long remaining = remainingRegions.get();
+                        channel.info("Processed %d/%d regions (%.3f%%)", total - remaining, total, (float) (total - remaining) / (float) total * 100.0f);
+                        if (remaining == 0) {
+                            return;
+                        }
+                    }
+                });
+                t.setDaemon(true);
+                t.start();
+            }
+        }
 
         regionPositions.stream().parallel()
                 .forEach((IOConsumer<Vec2i>) pos -> {
@@ -134,6 +161,7 @@ public class MapMode implements Mode {
                     } finally {
                         ReferenceCountUtil.release(headers);
                     }
+                    remainingRegions.getAndDecrement();
                 });
 
         logger.info("Writing image...");

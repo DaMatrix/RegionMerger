@@ -96,7 +96,6 @@ public class Add implements Mode {
 
         logger.info("Loaded output world with %d existing regions.", dst.regions().size());
         logger.info("Loaded %d input worlds with a total of %d distinct regions.", sources.size(), regionPositions.size());
-        long time = System.currentTimeMillis();
         AtomicLong remainingRegions = new AtomicLong(regionPositions.size());
         AtomicLong totalChunks = new AtomicLong(0L);
 
@@ -236,15 +235,9 @@ public class Add implements Mode {
                     remainingRegions.getAndDecrement();
                 });
 
-        time = System.currentTimeMillis() - time;
         logger.success(
-                "Copied %d chunks (%.2f MB) in %02dh %02dm %02ds %03dms",
+                "Copied %d chunks (%.2f MB)",
                 totalChunks.get(),
-                regionPositions.stream().map(dst::getAsFile).mapToLong(File::length).sum() / (1024.0d * 1024.0d),
-                time / (60L * 60L * 1000L),
-                (time / (60L * 1000L)) % 60L,
-                (time / 1000L) % 60L,
-                time % 1000L
-        );
+                regionPositions.stream().map(dst::getAsFile).mapToLong(File::length).sum() / (1024.0d * 1024.0d));
     }
 }

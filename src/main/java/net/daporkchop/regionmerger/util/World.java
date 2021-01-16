@@ -42,8 +42,8 @@ public class World {
     protected static final Pattern REGION_PATTERN = Pattern.compile("r\\.([-0-9]+)\\.([-0-9]+)\\.mca");
 
     protected final Collection<Vec2i> regions;
-    protected final File              path;
-    protected final boolean           readOnly;
+    protected final File path;
+    protected final boolean readOnly;
 
     public World(@NonNull File path, boolean readOnly) {
         this.path = path;
@@ -54,7 +54,6 @@ public class World {
         }
         PFiles.ensureDirectoryExists(this.path);
         this.regions = Arrays.stream(this.path.listFiles())
-                .filter(File::isFile)
                 .map(File::getName)
                 .map(REGION_PATTERN::matcher)
                 .filter(Matcher::matches)
