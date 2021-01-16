@@ -20,33 +20,30 @@
 
 package net.daporkchop.regionmerger.mode;
 
-import com.google.gson.JsonElement;
-import com.google.gson.JsonParser;
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.PooledByteBufAllocator;
 import lombok.NonNull;
 import net.daporkchop.lib.common.function.io.IOConsumer;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
 import net.daporkchop.lib.unsafe.PUnsafe;
-import net.daporkchop.regionmerger.util.World;
 import net.daporkchop.regionmerger.option.Arguments;
+import net.daporkchop.regionmerger.option.Option;
+import net.daporkchop.regionmerger.util.World;
 
-import java.io.BufferedInputStream;
+import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.Reader;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.file.Files;
 import java.nio.file.OpenOption;
+import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.Collection;
-import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
+import static net.daporkchop.lib.common.util.PValidation.*;
 import static net.daporkchop.lib.logging.Logging.*;
 import static net.daporkchop.mcworldlib.format.anvil.region.RegionConstants.*;
 
@@ -54,9 +51,8 @@ import static net.daporkchop.mcworldlib.format.anvil.region.RegionConstants.*;
  * @author DaPorkchop_
  */
 public class DeleteFromFile implements Mode {
-    protected static final OpenOption[] READ_ONLY_OPEN_OPTIONS = { StandardOpenOption.READ };
-    protected static final OpenOption[] BACKUP_WRITE_OPEN_OPTIONS = { StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING };
-    protected static final OpenOption[] CHUNK_DELETE_OPEN_OPTIONS = { StandardOpenOption.READ, StandardOpenOption.WRITE };
+    protected static final Option<String> FILE = Option.text("-file", null);
+    protected static final OpenOption[] DELETE_OPEN_OPTIONS = { StandardOpenOption.READ, StandardOpenOption.WRITE };
 
     @Override
     public void printUsage(@NonNull Logger logger) {
@@ -64,7 +60,7 @@ public class DeleteFromFile implements Mode {
 
     @Override
     public Arguments arguments() {
-        return new Arguments(false, false);
+        return new Arguments(true, false, FILE);
     }
 
     @Override
@@ -74,74 +70,52 @@ public class DeleteFromFile implements Mode {
 
     @Override
     public void run(@NonNull Arguments args) throws IOException {
-        final World dst = new World(new File("."), false);
+        final World dst = args.getDestination();
 
         logger.info("Loaded output world with %d existing regions.", dst.regions().size());
 
+        String fileName = args.get(FILE);
+        if (fileName == null) {
+            logger.error("--file must be set!");
+            System.exit(1);
+        }
+
         Collection<Vec2i> missingChunks;
-        try (Reader reader = new InputStreamReader(new BufferedInputStream(new FileInputStream(new File("./scanresult.json"))))) {
-            missingChunks = new JsonParser().parse(reader).getAsJsonObject().entrySet().stream()
-                    .filter(entry -> entry.getKey().equals("nether_chunks") || entry.getKey().equals("empty_chunks"))
-                    .map(Map.Entry::getValue)
-                    .map(JsonElement::getAsJsonObject)
-                    .map(obj -> obj.getAsJsonObject("data").getAsJsonArray("chunks"))
-                    .flatMap(arr -> StreamSupport.stream(arr.spliterator(), false))
-                    .map(JsonElement::getAsJsonObject)
-                    .map(obj -> new Vec2i(obj.get("x").getAsInt(), obj.get("z").getAsInt()))
+        try (BufferedReader reader = Files.newBufferedReader(Paths.get(fileName))) {
+            String first = reader.readLine();
+            checkArg("x,z".equals(first) || "z,x".equals(first), first);
+
+            Matcher matcher = Pattern.compile(String.format("^(?<%s>-?\\d+),(?<%s>-?\\d+)$", first.charAt(0), first.charAt(2))).matcher("");
+            missingChunks = reader.lines()
+                    .map(s -> {
+                        checkArg(matcher.reset(s).matches(), "invalid line: %s", s);
+                        return new Vec2i(Integer.parseInt(matcher.group("x")), Integer.parseInt(matcher.group("z")));
+                    })
                     .collect(Collectors.toSet());
         }
         Collection<Vec2i> missingRegions = missingChunks.stream()
                 .map(pos -> new Vec2i(pos.getX() >> 5, pos.getY() >> 5))
                 .collect(Collectors.toSet());
 
-        logger.info("Loaded %d missing chunk positions in %d regions.", missingChunks.size(), missingRegions.size())
-                .info("Backing up regions...");
+        logger.info("Loaded %d missing chunk positions in %d regions.", missingChunks.size(), missingRegions.size());
 
         missingRegions.parallelStream()
-                .map(dst::getAsFile)
-                .filter(File::exists)
-                .forEach((IOConsumer<File>) file -> {
-                    int len = (int) file.length();
-                    ByteBuf buf = PooledByteBufAllocator.DEFAULT.ioBuffer(len);
-                    try {
-                        try (FileChannel channel = FileChannel.open(file.toPath(), READ_ONLY_OPEN_OPTIONS)) {
-                            if (buf.writeBytes(channel, len) != len) {
-                                throw new IllegalStateException(String.format("Couldn't read %d bytes!", len));
-                            }
-                        }
-                        try (FileChannel channel = FileChannel.open(new File(file.getAbsolutePath() + ".bak").toPath(), BACKUP_WRITE_OPEN_OPTIONS)) {
-                            if (buf.readBytes(channel, len) != len) {
-                                throw new IllegalStateException(String.format("Couldn't write %d bytes!", len));
-                            }
-                        }
-                    } finally {
-                        buf.release();
+                .forEach((IOConsumer<Vec2i>) pos -> {
+                    File rFile = dst.getAsFile(pos);
+                    if (!rFile.exists()) {
+                        return;
+                    }
+                    try (FileChannel channel = FileChannel.open(rFile.toPath(), DELETE_OPEN_OPTIONS)) {
+                        MappedByteBuffer headers = channel.map(FileChannel.MapMode.READ_WRITE, 0L, SECTOR_BYTES);
+                        missingChunks.stream()
+                                .filter(chunk -> (chunk.getX() >> 5) == pos.getX() && (chunk.getY() >> 5) == pos.getY())
+                                .mapToInt(chunk -> getOffsetIndex(chunk.getX() & 0x1F, chunk.getY() & 0x1F))
+                                .distinct()
+                                .forEach(index -> headers.putInt(index, 0));
+                        PUnsafe.pork_releaseBuffer(headers.force());
                     }
                 });
 
-        if (false) {
-            logger.info("Searching for regions containing the missing chunks...");
-        } else {
-            logger.info("Deleting all of the chunks from the world...");
-
-            missingRegions.parallelStream()
-                    .forEach((IOConsumer<Vec2i>) pos -> {
-                        File rFile = dst.getAsFile(pos);
-                        if (!rFile.exists()) {
-                            return;
-                        }
-                        try (FileChannel channel = FileChannel.open(rFile.toPath(), CHUNK_DELETE_OPEN_OPTIONS)) {
-                            MappedByteBuffer headers = channel.map(FileChannel.MapMode.READ_WRITE, 0L, SECTOR_BYTES);
-                            missingChunks.stream()
-                                    .filter(chunk -> (chunk.getX() >> 5) == pos.getX() && (chunk.getY() >> 5) == pos.getY())
-                                    .mapToInt(chunk -> getOffsetIndex(chunk.getX() & 0x1F, chunk.getY() & 0x1F))
-                                    .distinct()
-                                    .forEach(index -> headers.putInt(index, 0));
-                            PUnsafe.pork_releaseBuffer(headers.force());
-                        }
-                    });
-
-            logger.info("Done!");
-        }
+        logger.success("Done!");
     }
 }

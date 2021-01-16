@@ -56,7 +56,7 @@ public class Main {
             this.put("map", new net.daporkchop.regionmerger.mode.Map());
             this.put("optimize", new Optimize());
 
-            this.put("debug-deletefromfile", new DeleteFromFile());
+            this.put("deletefromfile", new DeleteFromFile());
         }
     };
 
