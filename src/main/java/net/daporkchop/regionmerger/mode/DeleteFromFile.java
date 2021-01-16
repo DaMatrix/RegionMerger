@@ -22,6 +22,7 @@ package net.daporkchop.regionmerger.mode;
 
 import lombok.NonNull;
 import net.daporkchop.lib.common.function.io.IOConsumer;
+import net.daporkchop.lib.common.misc.file.PFiles;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
 import net.daporkchop.lib.unsafe.PUnsafe;
@@ -38,7 +39,8 @@ import java.nio.file.Files;
 import java.nio.file.OpenOption;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
-import java.util.Collection;
+import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -80,39 +82,51 @@ public class DeleteFromFile implements Mode {
             System.exit(1);
         }
 
-        Collection<Vec2i> missingChunks;
+        Map<Vec2i, List<Integer>> missing;
         try (BufferedReader reader = Files.newBufferedReader(Paths.get(fileName))) {
             String first = reader.readLine();
             checkArg("x,z".equals(first) || "z,x".equals(first), first);
 
             Matcher matcher = Pattern.compile(String.format("^(?<%s>-?\\d+),(?<%s>-?\\d+)$", first.charAt(0), first.charAt(2))).matcher("");
-            missingChunks = reader.lines()
+            missing = reader.lines()
                     .map(s -> {
                         checkArg(matcher.reset(s).matches(), "invalid line: %s", s);
                         return new Vec2i(Integer.parseInt(matcher.group("x")), Integer.parseInt(matcher.group("z")));
                     })
-                    .collect(Collectors.toSet());
+                    .distinct()
+                    .collect(Collectors.groupingBy(
+                            pos -> new Vec2i(pos.getX() >> 5, pos.getY() >> 5),
+                            Collectors.mapping(pos -> getOffsetIndex(pos.getX() & 0x1F, pos.getY() & 0x1F), Collectors.toList())));
         }
-        Collection<Vec2i> missingRegions = missingChunks.stream()
-                .map(pos -> new Vec2i(pos.getX() >> 5, pos.getY() >> 5))
-                .collect(Collectors.toSet());
 
-        logger.info("Loaded %d missing chunk positions in %d regions.", missingChunks.size(), missingRegions.size());
+        logger.info("Loaded %d missing chunk positions in %d regions.", missing.values().stream().mapToInt(List::size).sum(), missing.size());
 
-        missingRegions.parallelStream()
-                .forEach((IOConsumer<Vec2i>) pos -> {
-                    File rFile = dst.getAsFile(pos);
-                    if (!rFile.exists()) {
-                        return;
-                    }
-                    try (FileChannel channel = FileChannel.open(rFile.toPath(), DELETE_OPEN_OPTIONS)) {
+        missing.entrySet().stream().parallel()
+                .filter(entry -> dst.regions().contains(entry.getKey()))
+                .forEach((IOConsumer<Map.Entry<Vec2i, List<Integer>>>) entry -> {
+                    File regionFile = dst.getAsFile(entry.getKey());
+
+                    boolean delete;
+                    try (FileChannel channel = FileChannel.open(regionFile.toPath(), DELETE_OPEN_OPTIONS)) {
                         MappedByteBuffer headers = channel.map(FileChannel.MapMode.READ_WRITE, 0L, SECTOR_BYTES);
-                        missingChunks.stream()
-                                .filter(chunk -> (chunk.getX() >> 5) == pos.getX() && (chunk.getY() >> 5) == pos.getY())
-                                .mapToInt(chunk -> getOffsetIndex(chunk.getX() & 0x1F, chunk.getY() & 0x1F))
-                                .distinct()
-                                .forEach(index -> headers.putInt(index, 0));
+                        entry.getValue().forEach(i -> headers.putInt(i, 0));
+
+                        //determine whether or not we should delete the file
+                        int count = 0;
+                        for (int x = 0; x < 32; x++) {
+                            for (int z = 0; z < 32; z++) {
+                                if (headers.getInt(getOffsetIndex(x, z)) != 0) {
+                                    count++;
+                                }
+                            }
+                        }
+                        delete = count == 0;
+
                         PUnsafe.pork_releaseBuffer(headers.force());
+                    }
+
+                    if (delete) {
+                        PFiles.rm(regionFile);
                     }
                 });
 

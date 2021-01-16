@@ -55,7 +55,7 @@ import static net.daporkchop.mcworldlib.format.anvil.region.RegionConstants.*;
  *
  * @author DaPorkchop_
  */
-public class Map implements Mode {
+public class MapMode implements Mode {
     protected static final Option<Type> TYPE = Option.ofEnum("-type", Type.class, null);
     protected static final Option<String> OUTPUT = Option.text("-output", "map.png");
     protected static final Option<Boolean> OVERWRITE = Option.flag("o");

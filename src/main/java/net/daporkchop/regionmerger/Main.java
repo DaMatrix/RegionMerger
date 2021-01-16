@@ -22,11 +22,11 @@ package net.daporkchop.regionmerger;
 
 import net.daporkchop.lib.logging.LogAmount;
 import net.daporkchop.lib.logging.Logger;
-import net.daporkchop.lib.logging.Logging;
 import net.daporkchop.mcworldlib.format.anvil.region.RegionConstants;
 import net.daporkchop.regionmerger.mode.Add;
 import net.daporkchop.regionmerger.mode.DeleteFromFile;
 import net.daporkchop.regionmerger.mode.FindMissing;
+import net.daporkchop.regionmerger.mode.MapMode;
 import net.daporkchop.regionmerger.mode.Merge;
 import net.daporkchop.regionmerger.mode.Mode;
 import net.daporkchop.regionmerger.mode.Optimize;
@@ -51,12 +51,11 @@ public class Main {
     public static final Map<String, Mode> MODES = new HashMap<String, Mode>() {
         {
             this.put("add", new Add());
-            this.put("findmissing", new FindMissing());
-            this.put("merge", new Merge());
-            this.put("map", new net.daporkchop.regionmerger.mode.Map());
-            this.put("optimize", new Optimize());
-
             this.put("deletefromfile", new DeleteFromFile());
+            this.put("findmissing", new FindMissing());
+            this.put("map", new MapMode());
+            this.put("merge", new Merge());
+            this.put("optimize", new Optimize());
         }
     };
 
