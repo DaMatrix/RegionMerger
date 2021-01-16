@@ -28,6 +28,7 @@ import net.daporkchop.lib.common.function.throwing.ERunnable;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
 import net.daporkchop.lib.unsafe.PUnsafe;
+import net.daporkchop.regionmerger.util.Sort;
 import net.daporkchop.regionmerger.util.Utils;
 import net.daporkchop.regionmerger.util.World;
 import net.daporkchop.regionmerger.option.Arguments;
@@ -55,6 +56,7 @@ import static net.daporkchop.regionmerger.Main.*;
  */
 public class Merge implements Mode {
     protected static final Option<Integer> PROGRESS_UPDATE_DELAY = Option.integer("p", 5000, 0, Integer.MAX_VALUE);
+    protected static final Option<Sort> SORT = Option.ofEnum("-sort", Sort.class, Sort.YOUNGEST);
 
     protected static final OpenOption[] READ_OPEN_OPTIONS = { StandardOpenOption.READ };
     protected static final OpenOption[] WRITE_OPEN_OPTIONS = { StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW };
@@ -69,12 +71,14 @@ public class Merge implements Mode {
                 .info("      merge [options] <destination> <source> [source]...")
                 .info("")
                 .info("    Options:")
-                .info("      -p <time>   Sets the time (in ms) between progress updates. Set to 0 to disable. Default: 5000");
+                .info("      --sort <sort>  Sets the algorithm used to sort individual chunks when multiple candidates exist.")
+                .info("                     Options: youngest, oldest, input_order. Default: youngest")
+                .info("      -p <time>      Sets the time (in ms) between progress updates. Set to 0 to disable. Default: 5000");
     }
 
     @Override
     public Arguments arguments() {
-        return new Arguments(true, true, PROGRESS_UPDATE_DELAY);
+        return new Arguments(true, true, PROGRESS_UPDATE_DELAY, SORT);
     }
 
     @Override
@@ -92,6 +96,8 @@ public class Merge implements Mode {
             System.exit(1);
         }
 
+        final Sort sort = args.get(SORT);
+
         Collection<Vec2i> regionPositions = sources.stream()
                 .map(World::regions)
                 .flatMap(Collection::stream)
@@ -99,7 +105,6 @@ public class Merge implements Mode {
 
         logger.info("Loaded %d input worlds with a total of %d distinct regions.", sources.size(), regionPositions.size());
 
-        long time = System.currentTimeMillis();
         AtomicLong remainingRegions = new AtomicLong(regionPositions.size());
         AtomicLong totalChunks = new AtomicLong(0L);
 
@@ -175,25 +180,25 @@ public class Merge implements Mode {
                 int chunks = 0;
                 for (int x = 0; x < 32; x++) {
                     for (int z = 0; z < 32; z++) {
-                        final int offset = getOffsetIndex(x, z);
-                        for (int i = 0; i < regionsCount; i++) {
-                            ByteBuf region = regions[i];
-                            final int chunkOffset = region.getInt(offset);
-                            if (chunkOffset != 0) {
-                                final int chunkPos = (chunkOffset >>> 8) * SECTOR_BYTES;
-                                final int sizeBytes = region.getInt(chunkPos);
+                        ByteBuf region = sort.select(regions, regionsCount, x, z);
 
-                                buf.setInt(offset + SECTOR_BYTES, region.getInt(offset + SECTOR_BYTES)); //copy timestamp
+                        if (region != null) {
+                            final int offsetIndex = getOffsetIndex(x, z);
+                            final int timestampIndex = getTimestampIndex(x, z);
 
-                                buf.writeBytes(region, chunkPos, sizeBytes + 4); //copy chunk data
-                                buf.writeBytes(EMPTY_SECTOR, 0, ((buf.writerIndex() - 1 >> 12) + 1 << 12) - buf.writerIndex()); //pad to next sector
+                            int chunkOffset = region.getInt(offsetIndex);
+                            final int chunkPos = (chunkOffset >>> 8) * SECTOR_BYTES;
+                            final int sizeBytes = region.getInt(chunkPos);
 
-                                final int chunkSectors = (buf.writerIndex() - 1 >> 12) + 1; //compute next chunk sector
-                                buf.setInt(offset, (chunkSectors - sector) | (sector << 8)); //set offset value in region header
-                                sector = chunkSectors;
-                                chunks++;
-                                break;
-                            }
+                            buf.setInt(timestampIndex, region.getInt(timestampIndex)); //copy timestamp
+
+                            buf.writeBytes(region, chunkPos, sizeBytes + 4);
+                            buf.writeBytes(EMPTY_SECTOR, 0, ((buf.writerIndex() - 1 >> 12) + 1 << 12) - buf.writerIndex()); //pad to next sector
+
+                            final int chunkSectors = (buf.writerIndex() - 1 >> 12) + 1; //compute next chunk sector
+                            buf.setInt(offsetIndex, (chunkSectors - sector) | (sector << 8)); //set offset value in region header
+                            sector = chunkSectors;
+                            chunks++;
                         }
                     }
                 }
