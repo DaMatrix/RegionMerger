@@ -33,7 +33,7 @@ import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.mcworldlib.format.anvil.region.RawChunk;
 import net.daporkchop.mcworldlib.format.anvil.region.RegionFile;
 import net.daporkchop.mcworldlib.format.anvil.region.impl.MemoryMappedRegionFile;
-import net.daporkchop.regionmerger.World;
+import net.daporkchop.regionmerger.util.World;
 import net.daporkchop.regionmerger.option.Arguments;
 import net.daporkchop.regionmerger.option.Option;
 
@@ -48,7 +48,7 @@ import java.util.stream.Collectors;
 
 import static net.daporkchop.lib.logging.Logging.*;
 import static net.daporkchop.mcworldlib.format.anvil.region.RegionConstants.*;
-import static net.daporkchop.regionmerger.RegionMerger.*;
+import static net.daporkchop.regionmerger.Main.*;
 
 /**
  * @author DaPorkchop_

@@ -32,7 +32,7 @@ ext {
     programVersion = "0.1.10-SNAPSHOT"
 
     junitVersion = "4.12"
-    lombokVersion = "1.16.20"
+    lombokVersion = "1.18.16"
     mcworldlibVersion = "0.0.1-1.16.4-SNAPSHOT"
     porklibVersion = "0.5.5-SNAPSHOT"
 }
@@ -89,6 +89,6 @@ jar {
     manifest {
         attributes "Implementation-Title": "DaPorkchop_",
                 "Implementation-Version": version,
-                "Main-Class": "net.daporkchop.regionmerger.RegionMerger"
+                "Main-Class": "net.daporkchop.regionmerger.Main"
     }
 }

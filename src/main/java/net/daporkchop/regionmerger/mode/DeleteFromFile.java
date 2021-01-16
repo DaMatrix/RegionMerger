@@ -29,7 +29,7 @@ import net.daporkchop.lib.common.function.io.IOConsumer;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
 import net.daporkchop.lib.unsafe.PUnsafe;
-import net.daporkchop.regionmerger.World;
+import net.daporkchop.regionmerger.util.World;
 import net.daporkchop.regionmerger.option.Arguments;
 
 import java.io.BufferedInputStream;
@@ -92,7 +92,6 @@ public class DeleteFromFile implements Mode {
         }
         Collection<Vec2i> missingRegions = missingChunks.stream()
                 .map(pos -> new Vec2i(pos.getX() >> 5, pos.getY() >> 5))
-                .distinct()
                 .collect(Collectors.toSet());
 
         logger.info("Loaded %d missing chunk positions in %d regions.", missingChunks.size(), missingRegions.size())

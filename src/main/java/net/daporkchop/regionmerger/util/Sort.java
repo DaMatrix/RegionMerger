@@ -18,7 +18,7 @@
  *
  */
 
-package net.daporkchop.regionmerger;
+package net.daporkchop.regionmerger.util;
 
 import io.netty.buffer.ByteBuf;
 import lombok.NonNull;

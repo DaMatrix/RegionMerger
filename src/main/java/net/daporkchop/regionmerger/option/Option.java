@@ -26,7 +26,7 @@ import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.Accessors;
 import net.daporkchop.lib.common.misc.string.PStrings;
-import net.daporkchop.regionmerger.World;
+import net.daporkchop.regionmerger.util.World;
 
 import java.io.File;
 import java.util.ArrayList;

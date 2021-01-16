@@ -27,7 +27,7 @@ import net.daporkchop.lib.common.misc.string.PStrings;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
 import net.daporkchop.lib.unsafe.PUnsafe;
-import net.daporkchop.regionmerger.World;
+import net.daporkchop.regionmerger.util.World;
 import net.daporkchop.regionmerger.option.Arguments;
 import net.daporkchop.regionmerger.option.Option;
 

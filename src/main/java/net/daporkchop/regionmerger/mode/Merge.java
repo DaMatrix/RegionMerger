@@ -28,7 +28,8 @@ import net.daporkchop.lib.common.function.throwing.ERunnable;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
 import net.daporkchop.lib.unsafe.PUnsafe;
-import net.daporkchop.regionmerger.World;
+import net.daporkchop.regionmerger.util.Utils;
+import net.daporkchop.regionmerger.util.World;
 import net.daporkchop.regionmerger.option.Arguments;
 import net.daporkchop.regionmerger.option.Option;
 
@@ -47,7 +48,7 @@ import java.util.stream.IntStream;
 
 import static net.daporkchop.lib.logging.Logging.*;
 import static net.daporkchop.mcworldlib.format.anvil.region.RegionConstants.*;
-import static net.daporkchop.regionmerger.RegionMerger.*;
+import static net.daporkchop.regionmerger.Main.*;
 
 /**
  * @author DaPorkchop_
@@ -221,15 +222,10 @@ public class Merge implements Mode {
             }
         });
 
-        time = System.currentTimeMillis() - time;
         logger.success(
-                "Copied %d chunks (%.2f MB) in %02dh %02dm %02ds %03dms",
+                "Copied %d chunks (%.2f MiB)",
                 totalChunks.get(),
-                regionPositions.stream().map(dst::getAsFile).mapToLong(File::length).sum() / (1024.0d * 1024.0d),
-                time / (60L * 60L * 1000L),
-                (time / (60L * 1000L)) % 60L,
-                (time / 1000L) % 60L,
-                time % 1000L
+                regionPositions.stream().map(dst::getAsFile).mapToLong(File::length).sum() / (1024.0d * 1024.0d)
         );
     }
 }

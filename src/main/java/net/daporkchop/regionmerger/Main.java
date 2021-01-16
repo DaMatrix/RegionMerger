@@ -31,6 +31,7 @@ import net.daporkchop.regionmerger.mode.Merge;
 import net.daporkchop.regionmerger.mode.Mode;
 import net.daporkchop.regionmerger.mode.Optimize;
 import net.daporkchop.regionmerger.option.Arguments;
+import net.daporkchop.regionmerger.util.Utils;
 
 import java.io.File;
 import java.io.IOException;
@@ -43,7 +44,7 @@ import static net.daporkchop.lib.logging.Logging.*;
 /**
  * @author DaPorkchop_
  */
-public class RegionMerger {
+public class Main {
     public static final byte[] EMPTY_SECTOR = new byte[RegionConstants.SECTOR_BYTES];
     public static final byte[] EMPTY_HEADERS = new byte[RegionConstants.HEADER_BYTES];
 
@@ -96,8 +97,9 @@ public class RegionMerger {
         }
         Arguments arguments = mode.arguments();
         arguments.load(Arrays.asList(Arrays.copyOfRange(args, 1, args.length)).iterator());
-        mode.run(arguments);
 
-        logger.success("Done!");
+        long startTime = System.currentTimeMillis();
+        mode.run(arguments);
+        logger.success("Operation completed in %s", Utils.formatDuration(System.currentTimeMillis() - startTime));
     }
 }
