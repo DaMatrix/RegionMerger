@@ -27,7 +27,6 @@ import net.daporkchop.regionmerger.mode.Add;
 import net.daporkchop.regionmerger.mode.DeleteFromFile;
 import net.daporkchop.regionmerger.mode.FindMissing;
 import net.daporkchop.regionmerger.mode.MapMode;
-import net.daporkchop.regionmerger.mode.Merge;
 import net.daporkchop.regionmerger.mode.Mode;
 import net.daporkchop.regionmerger.mode.Optimize;
 import net.daporkchop.regionmerger.option.Arguments;
@@ -54,7 +53,6 @@ public class Main {
             this.put("deletefromfile", new DeleteFromFile());
             this.put("findmissing", new FindMissing());
             this.put("map", new MapMode());
-            this.put("merge", new Merge());
             this.put("optimize", new Optimize());
         }
     };

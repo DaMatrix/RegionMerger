@@ -33,9 +33,9 @@ import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.mcworldlib.format.anvil.region.RawChunk;
 import net.daporkchop.mcworldlib.format.anvil.region.RegionFile;
 import net.daporkchop.mcworldlib.format.anvil.region.impl.MemoryMappedRegionFile;
-import net.daporkchop.regionmerger.util.World;
 import net.daporkchop.regionmerger.option.Arguments;
 import net.daporkchop.regionmerger.option.Option;
+import net.daporkchop.regionmerger.util.World;
 
 import java.io.File;
 import java.io.IOException;

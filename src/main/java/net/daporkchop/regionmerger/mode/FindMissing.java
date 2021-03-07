@@ -22,6 +22,7 @@ package net.daporkchop.regionmerger.mode;
 
 import lombok.NonNull;
 import net.daporkchop.lib.common.function.io.IOFunction;
+import net.daporkchop.lib.common.math.BinMath;
 import net.daporkchop.lib.common.misc.file.PFiles;
 import net.daporkchop.lib.common.misc.string.PStrings;
 import net.daporkchop.lib.logging.Logger;
@@ -42,9 +43,13 @@ import java.nio.file.OpenOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collector;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.LongStream;
 import java.util.stream.Stream;
 
 import static java.lang.Math.*;
@@ -60,6 +65,7 @@ public class FindMissing implements Mode {
     protected static final Option<Integer> MIN_Z = Option.integer("-minZ", Integer.MIN_VALUE);
     protected static final Option<Integer> MAX_X = Option.integer("-maxX", Integer.MIN_VALUE);
     protected static final Option<Integer> MAX_Z = Option.integer("-maxZ", Integer.MIN_VALUE);
+    protected static final Option<Boolean> REGION = Option.flag("r");
     protected static final Option<Boolean> OVERWRITE = Option.flag("o");
     protected static final Option<Format> FORMAT = Option.ofEnum("-format", Format.class, Format.MISSINGCHUNKS_JSON);
     protected static final Option<String> OUTPUT = Option.text("-output", "missingchunks.json");
@@ -80,15 +86,16 @@ public class FindMissing implements Mode {
                 .info("      --minZ <minZ>       Set the min Z coord to check (in regions) (inclusive)")
                 .info("      --maxX <minX>       Set the max X coord to check (in regions) (inclusive)")
                 .info("      --maxZ <minZ>       Set the max Z coord to check (in regions) (inclusive)")
-                .info("      --format <format>   Set the output format that will be used. Available options: missingchunks_json, geojson")
+                .info("      --format <format>   Set the output format that will be used. Available options: missingchunks_json, geojson, geojson_negate_y")
                 .info("                          Default: missingchunks_json")
                 .info("      --output <file>     Sets the file that data will be written to. Default: missingchunks.json")
+                .info("      -r                  Scans for missing regions rather than missing chunks.")
                 .info("      -o                  Allows overwriting an existing output file.");
     }
 
     @Override
     public Arguments arguments() {
-        return new Arguments(false, true, MIN_X, MIN_Z, MAX_X, MAX_Z, OVERWRITE, FORMAT, OUTPUT);
+        return new Arguments(false, true, MIN_X, MIN_Z, MAX_X, MAX_Z, OVERWRITE, FORMAT, REGION, OUTPUT);
     }
 
     @Override
@@ -112,12 +119,16 @@ public class FindMissing implements Mode {
             throw new IllegalArgumentException("maxZ must be greater than or equal to minZ!");
         }
 
-        logger.info("Loaded %d input worlds with a total of %d distinct regions.", sources.size(), sources.stream().map(World::regions).flatMap(Collection::stream).distinct().count());
+        Set<Vec2i> positions = new HashSet<>(sources.stream().map(World::regions).mapToInt(Collection::size).sum());
+        sources.stream().map(World::regions).forEach(positions::addAll);
+
+        logger.info("Loaded %d input worlds with a total of %d distinct regions.", sources.size(), positions.size());
 
         final int deltaX = (maxX + 1) - minX;
         final int deltaZ = (maxZ + 1) - minZ;
 
         final Format format = args.get(FORMAT);
+        final boolean region = args.get(REGION);
 
         final File missingChunksJson = new File(args.get(OUTPUT));
         if (PFiles.checkFileExists(missingChunksJson) && !args.get(OVERWRITE)) {
@@ -128,66 +139,68 @@ public class FindMissing implements Mode {
              FileLock lock = missingChunksJsonChannel.tryLock()) {
             checkState(lock != null, "Unable to obtain lock on missingchunks.json!");
 
-            Vec2i[] searchPositions = new Vec2i[deltaX * deltaZ];
-            for (int x = deltaX - 1; x >= 0; x--) {
-                for (int z = deltaZ - 1; z >= 0; z--) {
-                    searchPositions[x * deltaZ + z] = new Vec2i(minX + x, minZ + z);
-                }
+            Stream<Vec2i> searchPositions = LongStream.rangeClosed(minX, maxX)
+                    .flatMap(x -> IntStream.rangeClosed(minZ, maxZ).mapToLong(z -> BinMath.packXY((int) x, z)))
+                    .mapToObj(pos -> new Vec2i(BinMath.unpackX(pos), BinMath.unpackY(pos)));
+
+            Stream<Vec2i> missingPositionsStream;
+            if (region) {
+                missingPositionsStream = searchPositions.filter(pos -> !positions.contains(pos));
+            } else {
+                ThreadLocal<MappedByteBuffer[]> BUFFER_ARRAY_CACHE = ThreadLocal.withInitial(() -> new MappedByteBuffer[sources.size()]);
+                ThreadLocal<Vec2i[]> VEC2I_ARRAY_CACHE = ThreadLocal.withInitial(() -> new Vec2i[32 * 32]);
+                missingPositionsStream = searchPositions.parallel()
+                        .flatMap((IOFunction<Vec2i, Stream<Vec2i>>) regionPos -> {
+                            MappedByteBuffer[] buf = BUFFER_ARRAY_CACHE.get();
+                            int bufCount = 0;
+
+                            try {
+                                for (World world : sources) {
+                                    if (world.regions().contains(regionPos)) {
+                                        try (FileChannel channel = FileChannel.open(world.getAsFile(regionPos).toPath(), REGION_OPEN_OPTIONS)) {
+                                            if (channel.size() < SECTOR_BYTES) {
+                                                continue;
+                                            }
+                                            buf[bufCount++] = channel.map(FileChannel.MapMode.READ_ONLY, 0L, 4096L);
+                                        }
+                                    }
+                                }
+
+                                if (bufCount > 0) {
+                                    int missing = 0;
+                                    Vec2i[] arr = VEC2I_ARRAY_CACHE.get();
+                                    for (int x = 31; x >= 0; x--) {
+                                        LOOP_Z:
+                                        for (int z = 31; z >= 0; z--) {
+                                            for (int i = bufCount - 1; i >= 0; i--) {
+                                                if (buf[i].getInt(getOffsetIndex(x, z)) != 0) {
+                                                    continue LOOP_Z;
+                                                }
+                                            }
+                                            arr[missing++] = new Vec2i(regionPos.getX() * 32 + x, regionPos.getY() * 32 + z);
+                                        }
+                                    }
+                                    return missing == 0 ? Stream.empty() : Arrays.stream(Arrays.copyOf(arr, missing));
+                                } else {
+                                    //region doesn't exist in any input, so all chunks are missing
+                                    Vec2i[] result = new Vec2i[32 * 32];
+                                    for (int x = 31; x >= 0; x--) {
+                                        for (int z = 31; z >= 0; z--) {
+                                            result[x * 32 + z] = new Vec2i(regionPos.getX() * 32 + x, regionPos.getY() * 32 + z);
+                                        }
+                                    }
+                                    return Arrays.stream(result);
+                                }
+                            } finally {
+                                while (bufCount-- != 0) {
+                                    PUnsafe.pork_releaseBuffer(buf[bufCount]);
+                                    buf[bufCount] = null;
+                                }
+                            }
+                        });
             }
 
-            ThreadLocal<MappedByteBuffer[]> BUFFER_ARRAY_CACHE = ThreadLocal.withInitial(() -> new MappedByteBuffer[sources.size()]);
-            ThreadLocal<Vec2i[]> VEC2I_ARRAY_CACHE = ThreadLocal.withInitial(() -> new Vec2i[32 * 32]);
-            byte[] json = Arrays.stream(searchPositions).parallel()
-                    .flatMap((IOFunction<Vec2i, Stream<Vec2i>>) regionPos -> {
-                        MappedByteBuffer[] buf = BUFFER_ARRAY_CACHE.get();
-                        int bufCount = 0;
-
-                        try {
-                            for (World world : sources) {
-                                if (world.regions().contains(regionPos)) {
-                                    try (FileChannel channel = FileChannel.open(world.getAsFile(regionPos).toPath(), REGION_OPEN_OPTIONS)) {
-                                        if (channel.size() < SECTOR_BYTES) {
-                                            continue;
-                                        }
-                                        buf[bufCount++] = channel.map(FileChannel.MapMode.READ_ONLY, 0L, 4096L);
-                                    }
-                                }
-                            }
-
-                            if (bufCount > 0) {
-                                int missing = 0;
-                                Vec2i[] arr = VEC2I_ARRAY_CACHE.get();
-                                for (int x = 31; x >= 0; x--) {
-                                    LOOP_Z:
-                                    for (int z = 31; z >= 0; z--) {
-                                        for (int i = bufCount - 1; i >= 0; i--) {
-                                            if (buf[i].getInt(getOffsetIndex(x, z)) != 0) {
-                                                continue LOOP_Z;
-                                            }
-                                        }
-                                        arr[missing++] = new Vec2i(regionPos.getX() * 32 + x, regionPos.getY() * 32 + z);
-                                    }
-                                }
-                                return missing == 0 ? Stream.empty() : Arrays.stream(Arrays.copyOf(arr, missing));
-                            } else {
-                                //region doesn't exist in any input, so all chunks are missing
-                                Vec2i[] result = new Vec2i[32 * 32];
-                                for (int x = 31; x >= 0; x--) {
-                                    for (int z = 31; z >= 0; z--) {
-                                        result[x * 32 + z] = new Vec2i(regionPos.getX() * 32 + x, regionPos.getY() * 32 + z);
-                                    }
-                                }
-                                return Arrays.stream(result);
-                            }
-                        } finally {
-                            while (bufCount-- != 0) {
-                                PUnsafe.pork_releaseBuffer(buf[bufCount]);
-                                buf[bufCount] = null;
-                            }
-                        }
-                    })
-                    .collect(format.collector())
-                    .getBytes(StandardCharsets.UTF_8);
+            byte[] json = missingPositionsStream.collect(format.collector()).getBytes(StandardCharsets.UTF_8);
 
             int written = missingChunksJsonChannel.write(ByteBuffer.wrap(json));
             if (written != json.length) {
@@ -212,6 +225,16 @@ public class FindMissing implements Mode {
                         pos -> PStrings.fastFormat(
                                 "{\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[%1$d,%2$d]},\"properties\":{\"x\":%1$d,\"z\":%2$d}}",
                                 pos.getX(), pos.getY()),
+                        Collectors.joining(",", "{\"type\":\"FeatureCollection\",\"features\":[", "]}"));
+            }
+        },
+        GEOJSON_NEGATE_Y {
+            @Override
+            Collector<Vec2i, ?, String> collector() {
+                return Collectors.mapping(
+                        pos -> PStrings.fastFormat(
+                                "{\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[%1$d,%2$d]},\"properties\":{\"x\":%1$d,\"z\":%3$d}}",
+                                pos.getX(), -pos.getY(), pos.getY()),
                         Collectors.joining(",", "{\"type\":\"FeatureCollection\",\"features\":[", "]}"));
             }
         };

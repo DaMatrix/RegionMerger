@@ -59,9 +59,7 @@ public class Add implements Mode {
     @Override
     public void printUsage(@NonNull Logger logger) {
         logger.info("  add:")
-                .info("    Copies all distinct chunks from multiple source worlds into a single destination world. Similar to merge, except that it")
-                .info("    can add chunks to an existing world and is a fair bit slower.")
-                .info("    Note that all paths are to the region directory, not the world directory.")
+                .info("    Copies all distinct chunks from multiple source worlds into a single destination world.")
                 .info("")
                 .info("    Usage:")
                 .info("      add [options] <destination> <source> [source]...")
