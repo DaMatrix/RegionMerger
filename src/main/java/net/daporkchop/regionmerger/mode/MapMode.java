@@ -203,7 +203,7 @@ public class MapMode implements Mode {
         AGE(8192) {
             @Override
             Image createImage(@NonNull Format format, int minX, int maxZ, int sizeX, int sizeZ, @NonNull File dst) throws IOException {
-                return format.createImage(ImageType.INT_SCALE, minX << 5, maxZ << 5, sizeX << 5, sizeZ << 5, 32, dst);
+                return format.createImage(ImageType.INT_SCALE, minX << 5, maxZ << 5, sizeX << 5, sizeZ << 5, 16, dst);
             }
 
             @Override
@@ -219,7 +219,7 @@ public class MapMode implements Mode {
         EXISTS(4096) {
             @Override
             Image createImage(@NonNull Format format, int minX, int maxZ, int sizeX, int sizeZ, @NonNull File dst) throws IOException {
-                return format.createImage(ImageType.BOOLEAN, minX << 5, maxZ << 5, sizeX << 5, sizeZ << 5, 32, dst);
+                return format.createImage(ImageType.BOOLEAN, minX << 5, maxZ << 5, sizeX << 5, sizeZ << 5, 16, dst);
             }
 
             @Override
@@ -235,7 +235,7 @@ public class MapMode implements Mode {
         SIZE(Integer.MAX_VALUE) {
             @Override
             Image createImage(@NonNull Format format, int minX, int maxZ, int sizeX, int sizeZ, @NonNull File dst) throws IOException {
-                return format.createImage(ImageType.INT_SCALE, minX << 5, maxZ << 5, sizeX << 5, sizeZ << 5, 32, dst);
+                return format.createImage(ImageType.INT_SCALE, minX << 5, maxZ << 5, sizeX << 5, sizeZ << 5, 16, dst);
             }
 
             @Override
@@ -252,7 +252,7 @@ public class MapMode implements Mode {
         SIZE_FAST(4096) {
             @Override
             Image createImage(@NonNull Format format, int minX, int maxZ, int sizeX, int sizeZ, @NonNull File dst) throws IOException {
-                return format.createImage(ImageType.INT_SCALE, minX << 5, maxZ << 5, sizeX << 5, sizeZ << 5, 32, dst);
+                return format.createImage(ImageType.INT_SCALE, minX << 5, maxZ << 5, sizeX << 5, sizeZ << 5, 16, dst);
             }
 
             @Override
@@ -397,7 +397,7 @@ public class MapMode implements Mode {
                         options);
                 dataset.SetGeoTransform(new double[]{
                         minX * scale, scale, 0,
-                        (minZ + sizeZ) * scale, 0, -scale
+                        (sizeZ - (minZ + sizeZ)) * scale, 0, -scale
                 });
                 Band band = dataset.GetRasterBand(1);
 
