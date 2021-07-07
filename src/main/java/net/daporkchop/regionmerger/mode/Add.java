@@ -134,10 +134,9 @@ public class Add implements Mode {
                                 throw new IllegalStateException(String.format("Region too small: %s (%d bytes)", dst.getAsFile(pos).getAbsolutePath(), size));
                             }
                             buf = PooledByteBufAllocator.DEFAULT.ioBuffer((int) size);
-                            int cnt = buf.writeBytes(channel, (int) size);
-                            if (cnt != size || buf.writerIndex() != size) {
-                                throw new IllegalStateException(String.format("Only read %d (%d)/%d bytes!", cnt, buf.writerIndex(), size));
-                            }
+                            do {
+                                buf.writeBytes(channel, (int) size - buf.writerIndex());
+                            } while (buf.writerIndex() != size);
                         } catch (Exception e) {
                             logger.warn(e);
                             if (buf != null) {
@@ -161,10 +160,9 @@ public class Add implements Mode {
                                     throw new IllegalStateException(String.format("Region too big: %s (%d bytes)", world.getAsFile(pos).getAbsolutePath(), size));
                                 }
                                 buf = PooledByteBufAllocator.DEFAULT.ioBuffer((int) size);
-                                int cnt = buf.writeBytes(channel, (int) size);
-                                if (cnt != size || buf.writerIndex() != size) {
-                                    throw new IllegalStateException(String.format("Only read %d (%d)/%d bytes!", cnt, buf.writerIndex(), size));
-                                }
+                                do {
+                                    buf.writeBytes(channel, (int) size - buf.writerIndex());
+                                } while (buf.writerIndex() != size);
                             } catch (Exception e) {
                                 logger.warn(e);
                                 if (buf != null) {
@@ -217,11 +215,9 @@ public class Add implements Mode {
                         }
                         if (chunks > 0) {
                             try (FileChannel channel = FileChannel.open(dstFile.toPath(), WRITE_OPEN_OPTIONS)) {
-                                int writeable = buf.readableBytes();
-                                int written = buf.readBytes(channel, writeable);
-                                if (writeable != written) {
-                                    throw new IllegalStateException(String.format("Only wrote %d/%d bytes!", written, writeable));
-                                }
+                                do {
+                                    buf.readBytes(channel, buf.readableBytes());
+                                } while (buf.isReadable());
                             }
                             totalChunks.getAndAdd(chunks);
                         } else {

@@ -188,11 +188,9 @@ public class Optimize implements Mode {
                     throw new IllegalStateException(String.format("Couldn't delete file \"%s\"!", file.getAbsolutePath()));
                 } else {
                     try (FileChannel channel = FileChannel.open(file.toPath(), OUTPUT_OPEN_OPTIONS)) {
-                        int writeable = dst.readableBytes();
-                        int written = dst.readBytes(channel, writeable);
-                        if (writeable != written) {
-                            throw new IllegalStateException(String.format("Only wrote %d/%d bytes!", written, writeable));
-                        }
+                        do {
+                            dst.readBytes(channel, dst.readableBytes());
+                        } while (dst.isReadable());
                     }
                 }
                 remainingRegions.getAndDecrement();
