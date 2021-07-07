@@ -29,8 +29,9 @@ version "0.1.9-SNAPSHOT"
 ext {
     //general things
     javaVersion = "1.8"
-    programVersion = "0.1.12-SNAPSHOT"
+    programVersion = "0.1.13-SNAPSHOT"
 
+    gdalVersion = "3.0.0"
     junitVersion = "4.12"
     lombokVersion = "1.18.16"
     mcworldlibVersion = "0.0.1-1.16.4-SNAPSHOT"
@@ -65,6 +66,8 @@ dependencies {
     shade "net.daporkchop.lib:logging:$porklibVersion"
 
     shade "net.daporkchop:mcworldlib:$mcworldlibVersion"
+
+    shade "org.gdal:gdal:$gdalVersion"
 
     compileOnly "org.projectlombok:lombok:$lombokVersion"
     annotationProcessor "org.projectlombok:lombok:$lombokVersion"

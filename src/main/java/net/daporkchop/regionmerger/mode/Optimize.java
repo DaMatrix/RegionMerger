@@ -74,8 +74,8 @@ public class Optimize implements Mode {
                 .info("    Options:")
                 .info("      -c          Enables re-compression of chunks. This will significantly increase the runtime (and CPU usage), but can help decrease")
                 .info("                  output size further.")
-                .info("      -l <level>  Sets the level (intensity) of the compression, from 0-8. 0 is the worst, 8 is the best. -1 is automatic. Only effective")
-                .info("                  with -c. Default: -1")
+                .info("      -l <level>  Sets the level (intensity) of the compression, from 0-9. 1 is the worst, 9 is the best. 0 does not compression and-1 is automatic. Only effective")
+                .info("                  -1 is automatic. Only effective with -c. Default: -1")
                 .info("      -p <time>   Sets the time (in ms) between progress updates. Set to 0 to disable. Default: 5000");
     }
 
