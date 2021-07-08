@@ -35,11 +35,11 @@ import net.daporkchop.mcworldlib.format.anvil.region.RegionFile;
 import net.daporkchop.mcworldlib.format.anvil.region.impl.MemoryMappedRegionFile;
 import net.daporkchop.regionmerger.option.Arguments;
 import net.daporkchop.regionmerger.option.Option;
+import net.daporkchop.regionmerger.util.Utils;
 import net.daporkchop.regionmerger.util.World;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.channels.FileChannel;
 import java.nio.file.OpenOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Collection;
@@ -187,11 +187,7 @@ public class Optimize implements Mode {
                 if (chunks == 0 && !file.delete()) {
                     throw new IllegalStateException(String.format("Couldn't delete file \"%s\"!", file.getAbsolutePath()));
                 } else {
-                    try (FileChannel channel = FileChannel.open(file.toPath(), OUTPUT_OPEN_OPTIONS)) {
-                        do {
-                            dst.readBytes(channel, dst.readableBytes());
-                        } while (dst.isReadable());
-                    }
+                    Utils.writeAndReplace(file.toPath(), dst);
                 }
                 remainingRegions.getAndDecrement();
                 totalChunks.getAndAdd(chunks);

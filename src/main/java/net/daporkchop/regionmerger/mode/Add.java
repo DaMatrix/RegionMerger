@@ -27,10 +27,11 @@ import net.daporkchop.lib.common.function.io.IOConsumer;
 import net.daporkchop.lib.common.function.throwing.ERunnable;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.lib.math.vector.i.Vec2i;
-import net.daporkchop.regionmerger.util.Sort;
-import net.daporkchop.regionmerger.util.World;
 import net.daporkchop.regionmerger.option.Arguments;
 import net.daporkchop.regionmerger.option.Option;
+import net.daporkchop.regionmerger.util.Sort;
+import net.daporkchop.regionmerger.util.Utils;
+import net.daporkchop.regionmerger.util.World;
 
 import java.io.File;
 import java.io.IOException;
@@ -213,12 +214,10 @@ public class Add implements Mode {
                                 regions[regionsCount] = null;
                             }
                         }
+
                         if (chunks > 0) {
-                            try (FileChannel channel = FileChannel.open(dstFile.toPath(), WRITE_OPEN_OPTIONS)) {
-                                do {
-                                    buf.readBytes(channel, buf.readableBytes());
-                                } while (buf.isReadable());
-                            }
+                            Utils.writeAndReplace(dstFile.toPath(), buf);
+
                             totalChunks.getAndAdd(chunks);
                         } else {
                             logger.warn("Found no input chunks for region (%d,%d)", pos.getX(), pos.getY());
