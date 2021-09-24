@@ -28,6 +28,7 @@ import net.daporkchop.lib.common.function.throwing.ERunnable;
 import net.daporkchop.lib.compression.context.PDeflater;
 import net.daporkchop.lib.compression.context.PInflater;
 import net.daporkchop.lib.compression.zlib.Zlib;
+import net.daporkchop.lib.compression.zlib.ZlibMode;
 import net.daporkchop.lib.compression.zlib.options.ZlibDeflaterOptions;
 import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.mcworldlib.format.anvil.region.RawChunk;
@@ -102,7 +103,7 @@ public class Optimize implements Mode {
 
         ChunkRecoder recoder;
         if (recompress) {
-            ThreadLocal<PInflater> inflaterCache = ThreadLocal.withInitial(Zlib.PROVIDER::inflater);
+            ThreadLocal<PInflater> inflaterCache = ThreadLocal.withInitial(() -> Zlib.PROVIDER.inflater(Zlib.PROVIDER.inflateOptions().withMode(ZlibMode.AUTO)));
             ZlibDeflaterOptions deflaterOptions = Zlib.PROVIDER.deflateOptions().withLevel(level);
             ThreadLocal<PDeflater> deflaterCache = ThreadLocal.withInitial(() -> Zlib.PROVIDER.deflater(deflaterOptions));
             recoder = (src, dst) -> {
