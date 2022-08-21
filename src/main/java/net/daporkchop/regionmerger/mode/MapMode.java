@@ -1,7 +1,7 @@
 /*
  * Adapted from The MIT License (MIT)
  *
- * Copyright (c) 2018-2021 DaPorkchop_
+ * Copyright (c) 2018-2022 DaPorkchop_
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation
  * files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy,
@@ -83,7 +83,7 @@ public class MapMode implements Mode {
                 .info("    Generates a map of the given input world based on some value.")
                 .info("")
                 .info("    Usage:")
-                .info("      merge [options] <source>")
+                .info("      map [options] <source>")
                 .info("")
                 .info("    Options:")
                 .info("      --type <type>      Sets the type of map that will be created. Options: age, exists, size, size_fast")
