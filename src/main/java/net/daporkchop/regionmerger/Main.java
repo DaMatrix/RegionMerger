@@ -25,7 +25,7 @@ import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.mcworldlib.format.anvil.region.RegionConstants;
 import net.daporkchop.regionmerger.mode.Add;
 import net.daporkchop.regionmerger.mode.DeleteFromFile;
-import net.daporkchop.regionmerger.mode.DumpTimestamps;
+import net.daporkchop.regionmerger.mode.Dump;
 import net.daporkchop.regionmerger.mode.FindMissing;
 import net.daporkchop.regionmerger.mode.MapMode;
 import net.daporkchop.regionmerger.mode.Mode;
@@ -52,7 +52,7 @@ public class Main {
         {
             this.put("add", new Add());
             this.put("deletefromfile", new DeleteFromFile());
-            this.put("dump_timestamps", new DumpTimestamps());
+            this.put("dump", new Dump());
             this.put("findmissing", new FindMissing());
             this.put("map", new MapMode());
             this.put("optimize", new Optimize());
