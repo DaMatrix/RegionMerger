@@ -29,7 +29,7 @@ version "0.1.9-SNAPSHOT"
 ext {
     //general things
     javaVersion = "1.8"
-    programVersion = "0.1.15-SNAPSHOT"
+    programVersion = "0.1.16-SNAPSHOT"
 
     gdalVersion = "3.0.0"
     junitVersion = "4.12"

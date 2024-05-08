@@ -1,7 +1,7 @@
 /*
  * Adapted from The MIT License (MIT)
  *
- * Copyright (c) 2018-2021 DaPorkchop_
+ * Copyright (c) 2018-2024 DaPorkchop_
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation
  * files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy,
@@ -25,6 +25,7 @@ import net.daporkchop.lib.logging.Logger;
 import net.daporkchop.mcworldlib.format.anvil.region.RegionConstants;
 import net.daporkchop.regionmerger.mode.Add;
 import net.daporkchop.regionmerger.mode.DeleteFromFile;
+import net.daporkchop.regionmerger.mode.DumpTimestamps;
 import net.daporkchop.regionmerger.mode.FindMissing;
 import net.daporkchop.regionmerger.mode.MapMode;
 import net.daporkchop.regionmerger.mode.Mode;
@@ -51,6 +52,7 @@ public class Main {
         {
             this.put("add", new Add());
             this.put("deletefromfile", new DeleteFromFile());
+            this.put("dump_timestamps", new DumpTimestamps());
             this.put("findmissing", new FindMissing());
             this.put("map", new MapMode());
             this.put("optimize", new Optimize());
